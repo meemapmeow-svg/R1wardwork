@@ -53,10 +53,11 @@ What it reads from the printed patient block:
 - **Patient sticker** — HN, ward code, name, age. If the barcode is sharp
   enough it is decoded and used to confirm the HN.
 
-- **Operative note** — operation date, and the free-text `Diagnosis :` and
-  `Operation :` block, kept exactly as printed, line by line (the numbered
-  items stay separate lines of one operation entry).
-  The coded pre/post-operative diagnosis lines are ignored.
+- **Operative note** — operation date, and the free-text diagnosis and
+  operation block in the middle of the page, headed either `Diagnosis :` /
+  `Operation :` or `Dx:` / `Op:`. The text is kept exactly as printed, line by
+  line (numbered or dashed items stay separate lines of one entry). The coded
+  pre/post-operative diagnosis lines and the coded OPERATION box are ignored.
 
 To add an operative note to a patient already in the list, open that patient
 and scan from there: their name, HN and ward are left as they are, only gaps

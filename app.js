@@ -492,27 +492,53 @@ function parsePatientText(raw) {
   // spacing and table-border marks are cleaned up.
   const exact = (v) => v.replace(/[ \t]+/g, ' ').replace(/^[\s|]+|[\s|]+$/g, '');
   const lines = text.split('\n');
-  const isHeading = (l) => /^[^A-Za-z0-9]{0,3}[A-Za-z][A-Za-z ./]{2,24}\s*[:;]/.test(l);
-  const isNumbered = (l) => /^\s*\d{1,2}\s*[).]/.test(l);
+  const isHeading = (l) => /^[^A-Za-z0-9]{0,3}[A-Za-z][A-Za-z ./]{1,24}\s*[:;]/.test(l);
+  // A list item: "1) ...", "2. ...", or a dash / bullet.
+  const isItem = (l) => /^\s*(?:\d{1,2}\s*[).]|[-–—•·*~])\s*\S/.test(l);
   // The lines under a "Label :" heading, up to the next heading. After a blank
-  // line only further numbered items are taken as part of the same block.
+  // line only further list items are taken as part of the same block.
+  // A page read as one block comes out in columns separated by wide gaps,
+  // with stray marks from boxes and margins. Split a line into its columns
+  // and drop the fragments that cannot be text.
+  const columns = (l) => [...l.matchAll(/\S+(?: {1,2}\S+)*/g)]
+    .map((m) => ({ at: m.index, text: m[0] }))
+    .filter((c) => /^[A-Za-z]{2,}\s*[:;]/.test(c.text) || (c.text.length > 3 && /[A-Za-z]{3}|\d{2}|[ก-๙]{4}/.test(c.text)));
+  // An English line that ends in a burst of Thai letters picked that up from a
+  // stamp or box edge next to it.
+  const noTail = (v) => (/^[\x20-\x7E]{8,}/.test(v) ? v.replace(/\s+[^\x00-\x7F].*$/, '') : v);
   const blockAfter = (at, label) => {
     const kept = [];
-    const inline = exact(lines[at].replace(label, ''));
+    // Start from the column holding the label; following lines use the
+    // column nearest to it, so text from a neighbouring box is not mixed in.
+    const head = columns(lines[at]).find((c) => label.test(c.text)) || { at: lines[at].search(/\S/), text: lines[at] };
+    const inline = noTail(exact(head.text.replace(label, '')));
     if (inline.length > 1) kept.push(inline);
     let gap = false;
     for (const l of lines.slice(at + 1, at + 14)) {
       if (!l.trim()) { gap = kept.length > 0; continue; }
-      if (isHeading(l) || (gap && !isNumbered(l))) break;
-      kept.push(exact(l));
+      const cols = columns(l);
+      if (!cols.length) continue;
+      const col = cols.reduce((best, c) => (Math.abs(c.at - head.at) < Math.abs(best.at - head.at) ? c : best));
+      if (isHeading(col.text) || (gap && !isItem(col.text))) break;
+      kept.push(noTail(exact(col.text)));
       gap = false;
     }
     return kept.join('\n');
   };
-  const dxAt = lines.findIndex((l) => /^[^A-Za-z]{0,3}Diagnosis\s*[:;]/i.test(l));
-  if (dxAt >= 0) { const dx = blockAfter(dxAt, /^.*?Diagnosis\s*[:;]/i); if (dx.length > 2) out.diagnosis = dx; }
-  const opAt = lines.findIndex((l) => /^[^A-Za-z]{0,3}Operation\s*[:;]/i.test(l));
-  if (opAt >= 0) { const op = blockAfter(opAt, /^.*?Operation\s*[:;]/i); if (op.length > 2) out.opName = op; }
+  // The free-text block is headed "Diagnosis :" / "Operation :" on some notes
+  // and "Dx:" / "Op:" on others. The coded PREOPERATIVE / POSTOPERATIVE
+  // DIAGNOSIS lines and the bare "OPERATION" box title are not it.
+  const findLabel = (words) => {
+    const label = new RegExp(`^[^A-Za-z]{0,3}(?:${words})\\s*[:;]`, 'i');
+    const usable = (l) => !/OPERATIVE\s+DIAG/i.test(l);
+    let at = lines.findIndex((l) => usable(l) && label.test(l));
+    if (at < 0) at = lines.findIndex((l) => usable(l) && columns(l).some((c) => label.test(c.text)));
+    return at < 0 ? '' : blockAfter(at, label);
+  };
+  const dx = findLabel('Diagnosis|Dx');
+  if (dx.length > 2) out.diagnosis = dx;
+  const op = findLabel('Operation|Op');
+  if (op.length > 2) out.opName = op;
 
   // The birth date is a second source for age and is read more reliably
   // than a lone two-digit number, so it wins when present.
@@ -562,8 +588,10 @@ async function getOcrWorker(langs) {
 // Small or faint photos read better enlarged, in grey, with contrast stretched.
 function enhanceForOcr(src) {
   const longSide = Math.max(src.width, src.height);
-  const scale = longSide < 1100 ? 2 : 1;
-  const canvas = h('canvas', { width: src.width * scale, height: src.height * scale });
+  // Bring the long side to about 2400px (at most doubling): a full page caught
+  // in a camera frame has letters too small to read otherwise.
+  const scale = Math.min(2, Math.max(1, 2400 / longSide));
+  const canvas = h('canvas', { width: Math.round(src.width * scale), height: Math.round(src.height * scale) });
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
@@ -630,13 +658,17 @@ function pickWard(codes) {
 //  - Thai+English, automatic layout: best for forms and for names
 //  - Thai+English, single block: steadiest for the digits on stickers
 //  - Thai only: steadiest for short Thai words such as month names
+//  - English only, single block: steadiest for the English text of an
+//    operative note; used in place of Thai-only once a note is recognised
 const OCR_PASSES = [[['tha', 'eng'], '3'], [['tha', 'eng'], '6'], [['tha'], '3']];
+const NOTE_PASS = [['eng'], '6'];
 
 async function ocrReadings(source, onProgress) {
   const canvas = enhanceForOcr(source);
   const readings = [];
   for (let i = 0; i < OCR_PASSES.length; i++) {
-    const [langs, layout] = OCR_PASSES[i];
+    const isNote = readings.some((r) => r.diagnosis || r.opName || r.opDate);
+    const [langs, layout] = i === 2 && isNote ? NOTE_PASS : OCR_PASSES[i];
     const worker = await getOcrWorker(langs);
     ocrProgress = (p) => onProgress((i + p) / OCR_PASSES.length);
     await worker.setParameters({ tessedit_pageseg_mode: layout });
@@ -721,8 +753,13 @@ async function readPatientPhoto(source, onProgress) {
   // Longer text: readings that differ only in spacing or punctuation count as agreeing.
   for (const k of ['diagnosis', 'opName']) {
     const loose = (v) => v.toLowerCase().replace(/[^a-z0-9ก-๙]/g, '');
-    const key = vote(all(k).map(loose));
-    settle(k, all(k).map(loose), key);
+    const keys = all(k).map(loose);
+    // With no majority, take the reading closest to the others (a line cut
+    // short and a line with stray marks both sit further out), then the longer.
+    const tally = (x) => keys.filter((y) => y === x).length;
+    const spread = (x) => keys.reduce((n, y) => n + editDistance(x.slice(0, 300), y.slice(0, 300)), 0);
+    const key = [...keys].sort((x, y) => tally(y) - tally(x) || spread(x) - spread(y) || y.length - x.length)[0];
+    settle(k, keys, key);
     if (key) found[k] = all(k).find((v) => loose(v) === key);
   }
   const codes = all('wardCode');
