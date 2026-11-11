@@ -69,6 +69,7 @@ function normalize(p) {
     age: str(p.age),
     hn: str(p.hn),
     ward: str(p.ward),
+    bed: str(p.bed),
     admitDate: date(p.admitDate),
     diagnosis: str(p.diagnosis),
     operations: (Array.isArray(p.operations) ? p.operations : [])
@@ -162,7 +163,7 @@ function visiblePatients() {
     if (p.archived !== (state.view === 'archived')) return false;
     if (state.ward && p.ward !== state.ward) return false;
     if (!q) return true;
-    return [p.name, p.hn, p.ward, p.diagnosis, p.notes, ...p.operations.map((o) => o.name)]
+    return [p.name, p.hn, p.ward, p.bed, p.diagnosis, p.notes, ...p.operations.map((o) => o.name)]
       .some((v) => v.toLowerCase().includes(q));
   });
   const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
@@ -170,7 +171,7 @@ function visiblePatients() {
   const sorters = {
     name: byName,
     admit: (a, b) => byAdmit(a, b) || byName(a, b),
-    ward: (a, b) => a.ward.localeCompare(b.ward, undefined, { numeric: true }) || byName(a, b),
+    ward: (a, b) => a.ward.localeCompare(b.ward, undefined, { numeric: true }) || a.bed.localeCompare(b.bed, undefined, { numeric: true }) || byName(a, b),
     pending: (a, b) => docStats(b).pending - docStats(a).pending || byAdmit(b, a) || byName(a, b),
   };
   return list.sort(sorters[state.sort] || sorters.pending);
@@ -221,6 +222,7 @@ function card(p) {
   const meta = [
     p.hn && `HN ${p.hn}`,
     p.ward,
+    p.bed && `Bed ${p.bed}`,
     p.admitDate && `Adm ${fmtDate(p.admitDate)}${!p.archived && day != null && day >= 0 ? ` (day ${day + 1})` : ''}`,
   ].filter(Boolean);
 
@@ -306,7 +308,7 @@ function openEditor(p) {
   editingId = p ? p.id : null;
   const data = p || normalize({ ward: state.ward, admitDate: todayStr() });
   $('#editorTitle').textContent = p ? 'Edit patient' : 'New patient';
-  for (const k of ['name', 'age', 'hn', 'ward', 'admitDate', 'diagnosis', 'notes']) form.elements[k].value = data[k];
+  for (const k of ['name', 'age', 'hn', 'ward', 'bed', 'admitDate', 'diagnosis', 'notes']) form.elements[k].value = data[k];
   $('#ops').replaceChildren(...(data.operations.length ? data.operations : []).map(opRow));
   $('#docRows').replaceChildren(...DOCS.map((d) => docRow(d, data.docs[d.id])));
   $('#wardList').replaceChildren(...wardsIn(patients).map((w) => h('option', { value: w })));
@@ -341,7 +343,7 @@ form.addEventListener('submit', (e) => {
   for (const d of DOCS) docs[d.id] = (form.querySelector(`input[name="doc-${d.id}"]:checked`) || {}).value;
   const next = normalize({
     ...(existing || {}),
-    name: f.name.value, age: f.age.value, hn: f.hn.value, ward: f.ward.value,
+    name: f.name.value, age: f.age.value, hn: f.hn.value, ward: f.ward.value, bed: f.bed.value,
     admitDate: f.admitDate.value, diagnosis: f.diagnosis.value, notes: f.notes.value,
     operations: [...document.querySelectorAll('#ops .op-row')].map((r) => ({
       name: $('[data-op="name"]', r).value, date: $('[data-op="date"]', r).value,

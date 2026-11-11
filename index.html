@@ -24,7 +24,7 @@
       </button>
     </div>
     <p id="summary" class="summary" aria-live="polite"></p>
-    <input id="search" class="search" type="search" placeholder="Search name, HN, diagnosis…" autocomplete="off" aria-label="Search patients">
+    <input id="search" class="search" type="search" placeholder="Search name, HN, bed, diagnosis…" autocomplete="off" aria-label="Search patients">
     <div class="controls">
       <div class="segmented" role="tablist" aria-label="Patient list">
         <button role="tab" data-view="active" aria-selected="true">Active</button>
@@ -84,10 +84,13 @@
               <input name="ward" list="wardList" autocomplete="off">
               <datalist id="wardList"></datalist>
             </label>
-            <label class="field">Admission date
-              <input name="admitDate" type="date">
+            <label class="field">Bed
+              <input name="bed" autocomplete="off">
             </label>
           </div>
+          <label class="field">Admission date
+            <input name="admitDate" type="date">
+          </label>
           <label class="field">Diagnosis
             <textarea name="diagnosis" rows="2"></textarea>
           </label>

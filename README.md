@@ -4,7 +4,7 @@ A small mobile-friendly app for keeping track of ward patients and their paperwo
 
 ## What it tracks
 
-- Patient name, age, hospital number (HN), ward, admission date
+- Patient name, age, hospital number (HN), ward, bed number, admission date
 - Diagnosis
 - Operations, each with its date (shows post-op day)
 - Document checklist per patient:
