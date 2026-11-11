@@ -919,7 +919,7 @@ $('#reportClose').addEventListener('click', () => report.close());
 $('#reportCopy').addEventListener('click', async () => {
   const ok = await copyText($('#reportText').value);
   if (ok) report.close();
-  toast(ok ? 'Report copied — paste it into your chat' : 'Could not copy. Select the text and copy it by hand.');
+  toast(ok ? 'Copied to clipboard — paste it into your chat' : 'Could not copy. Select the text and copy it by hand.');
 });
 $('#reportShare').addEventListener('click', async () => {
   try {

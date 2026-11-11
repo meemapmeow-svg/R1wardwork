@@ -1,6 +1,6 @@
 // Offline cache for the app shell. Patient data is never stored here —
 // it lives in localStorage and is not touched by the service worker.
-const CACHE = 'wardwork-shell-v8';
+const CACHE = 'wardwork-shell-v9';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 // The text reader used for scanning (large). Cached in the background so
