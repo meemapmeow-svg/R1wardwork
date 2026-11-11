@@ -138,6 +138,7 @@ h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
 
 .meta { margin: 2px 0 6px; color: var(--muted); font-size: .86rem; }
 .line { margin: 3px 0; font-size: .93rem; overflow-wrap: anywhere; }
+.line.pre { white-space: pre-line; }
 .muted { color: var(--muted); }
 .tag {
   display: inline-block; font-size: .7rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;

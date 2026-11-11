@@ -27,7 +27,8 @@ one) and fills in what it can read from the printed patient block:
   enough it is decoded and used to confirm the HN.
 
 - **Operative note** — operation date, and the free-text `Diagnosis :` and
-  `Operation :` block (numbered items are joined into one operation entry).
+  `Operation :` block, kept exactly as printed, line by line (the numbered
+  items stay separate lines of one operation entry).
   The coded pre/post-operative diagnosis lines are ignored.
 
 To add an operative note to a patient already in the list, open that patient

@@ -229,6 +229,8 @@ function card(p) {
   const ops = p.operations.map((o) => {
     const pod = daysSince(o.date);
     const when = o.date ? `${fmtDate(o.date)}${!p.archived && pod != null && pod >= 0 ? `, POD ${pod}` : ''}` : '';
+    // Several lines (as copied from an operative note): date first, then the lines as written.
+    if (o.name.includes('\n')) return h('p', { class: 'line pre' }, h('span', { class: 'tag' }, 'Op'), when && h('span', { class: 'muted' }, ` ${when}`), `\n${o.name}`);
     return h('p', { class: 'line' }, h('span', { class: 'tag' }, 'Op'), ` ${o.name || 'Operation'}`, when && h('span', { class: 'muted' }, ` — ${when}`));
   });
 
@@ -248,7 +250,7 @@ function card(p) {
         p.age && h('span', { class: 'age' }, `${p.age} y`)),
       h('span', { class: 'count' + (complete ? ' ok' : '') }, complete ? 'All done' : `${s.done}/${s.needed}`)),
     meta.length ? h('p', { class: 'meta' }, meta.join(' · ')) : null,
-    p.diagnosis && h('p', { class: 'line' }, h('span', { class: 'tag' }, 'Dx'), ` ${p.diagnosis}`),
+    p.diagnosis && h('p', { class: 'line pre' }, h('span', { class: 'tag' }, 'Dx'), ` ${p.diagnosis}`),
     ops,
     p.notes && h('p', { class: 'line muted' }, p.notes),
     h('div', { class: 'progress', 'aria-hidden': 'true' }, h('span', { style: `width:${s.needed ? (s.done / s.needed) * 100 : 0}%` })),
@@ -286,9 +288,14 @@ const form = $('#patientForm');
 let editingId = null;
 let dirty = false;
 
+// Enough rows to show multi-line text without scrolling inside the box.
+function rowsFor(text) {
+  return Math.min(10, text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 34)), 0));
+}
+
 function opRow(op = { name: '', date: '' }) {
   const row = h('div', { class: 'op-row' },
-    h('label', { class: 'field grow' }, 'Operation', h('textarea', { 'data-op': 'name', rows: op.name.length > 40 ? 3 : 1 }, op.name)),
+    h('label', { class: 'field grow' }, 'Operation', h('textarea', { 'data-op': 'name', rows: rowsFor(op.name) }, op.name)),
     h('label', { class: 'field' }, 'Date', h('input', { 'data-op': 'date', type: 'date', value: op.date })),
     h('button', { type: 'button', class: 'icon-btn remove', 'aria-label': 'Remove operation', onclick: () => { row.remove(); dirty = true; } }, '×'));
   return row;
@@ -475,25 +482,31 @@ function parsePatientText(raw) {
     if (dm && +dm[1] >= 1 && +dm[1] <= 31 && +dm[2] >= 1 && +dm[2] <= 12) out.opDayMonth = `${+dm[2]}-${+dm[1]}`;
   }
 
-  const tidy = (v) => v.replace(/\s+/g, ' ').replace(/^[\s\-–.:;]+|[\s\-–:;|]+$/g, '');
+  // Text is kept as printed, line by line (numbering included); only stray
+  // spacing and table-border marks are cleaned up.
+  const exact = (v) => v.replace(/[ \t]+/g, ' ').replace(/^[\s|]+|[\s|]+$/g, '');
   const lines = text.split('\n');
-  const dxLine = lines.find((l) => /^[^A-Za-z]{0,3}Diagnosis\s*[:;]/i.test(l));
-  if (dxLine) { const dx = tidy(dxLine.replace(/^.*?Diagnosis\s*[:;]/i, '')); if (dx.length > 2) out.diagnosis = dx; }
-
-  const opAt = lines.findIndex((l) => /^[^A-Za-z]{0,3}Operation\s*[:;]/i.test(l));
-  if (opAt >= 0) {
-    const items = [];
-    const inline = tidy(lines[opAt].replace(/^.*?Operation\s*[:;]/i, ''));
-    if (inline.length > 2) items.push(inline.replace(/^\d{1,2}\s*[).]\s*/, ''));
-    for (const l of lines.slice(opAt + 1)) {
-      if (!l.trim()) continue;
-      const item = l.match(/^\s*\d{1,2}\s*[).]\s*(.+)/);
-      if (item) items.push(tidy(item[1]));
-      else if (!items.length && !/^\s*(Implant|Procedure|Finding)/i.test(l)) { items.push(tidy(l)); break; }
-      else break;
+  const isHeading = (l) => /^[^A-Za-z0-9]{0,3}[A-Za-z][A-Za-z ./]{2,24}\s*[:;]/.test(l);
+  const isNumbered = (l) => /^\s*\d{1,2}\s*[).]/.test(l);
+  // The lines under a "Label :" heading, up to the next heading. After a blank
+  // line only further numbered items are taken as part of the same block.
+  const blockAfter = (at, label) => {
+    const kept = [];
+    const inline = exact(lines[at].replace(label, ''));
+    if (inline.length > 1) kept.push(inline);
+    let gap = false;
+    for (const l of lines.slice(at + 1, at + 14)) {
+      if (!l.trim()) { gap = kept.length > 0; continue; }
+      if (isHeading(l) || (gap && !isNumbered(l))) break;
+      kept.push(exact(l));
+      gap = false;
     }
-    if (items.length) out.opName = items.join('; ');
-  }
+    return kept.join('\n');
+  };
+  const dxAt = lines.findIndex((l) => /^[^A-Za-z]{0,3}Diagnosis\s*[:;]/i.test(l));
+  if (dxAt >= 0) { const dx = blockAfter(dxAt, /^.*?Diagnosis\s*[:;]/i); if (dx.length > 2) out.diagnosis = dx; }
+  const opAt = lines.findIndex((l) => /^[^A-Za-z]{0,3}Operation\s*[:;]/i.test(l));
+  if (opAt >= 0) { const op = blockAfter(opAt, /^.*?Operation\s*[:;]/i); if (op.length > 2) out.opName = op; }
 
   // The birth date is a second source for age and is read more reliably
   // than a lone two-digit number, so it wins when present.
@@ -805,6 +818,7 @@ function applyScan(found) {
     // sticker or your own typing came first); only gaps are filled.
     if (existing && k !== 'diagnosis' && existing[k]) continue;
     f[k].value = found[k];
+    if (k === 'diagnosis') f[k].rows = Math.max(2, rowsFor(found[k]));
     mark(f[k], k, labels[k]);
   }
   if (found.opName || found.opDate) {
@@ -816,7 +830,7 @@ function applyScan(found) {
       || rows.find((r) => found.opName && loose(get(r, 'name').value) === loose(found.opName))
       || rows.find((r) => !get(r, 'name').value.trim() && !get(r, 'date').value);
     if (!row) { row = opRow(); $('#ops').append(row); }
-    if (found.opName) { get(row, 'name').value = found.opName; get(row, 'name').rows = found.opName.length > 40 ? 3 : 1; mark(get(row, 'name'), 'opName', 'operation'); }
+    if (found.opName) { get(row, 'name').value = found.opName; get(row, 'name').rows = rowsFor(found.opName); mark(get(row, 'name'), 'opName', 'operation'); }
     if (found.opDate) { get(row, 'date').value = found.opDate; mark(get(row, 'date'), 'opDate', 'operation date'); }
   }
   if (!filled.length) {
