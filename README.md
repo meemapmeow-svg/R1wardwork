@@ -5,8 +5,9 @@ A small mobile-friendly app for keeping track of ward patients and their paperwo
 ## What it tracks
 
 - Patient name, age, hospital number (HN), ward, bed number, admission date
-- Diagnosis
-- Operations, each with its date (shows post-op day)
+- Diagnosis (the patient's own, e.g. on admission)
+- Operative notes, each with its date (shows post-op day), its own diagnosis
+  and the operation — kept separate from the patient's diagnosis
 - Document checklist per patient:
   Admission note, Diagnosis, Discharge summary, Discharge reconcile form,
   Medical certificate, Follow-up appointment, plus optional Fax claim and
@@ -20,7 +21,8 @@ patient can be archived, which moves them out of the active list.
 
 A patient with an operation gets a **Post-op report** button on their card.
 It builds the report header (name, age in years, HN, diagnosis, and the most
-recent operation) ready to **Copy** or **Share** into a chat app such as LINE.
+recent operative note's operation; the diagnosis is the operative note's, or
+the patient's if that is blank) ready to **Copy** or **Share** into a chat app such as LINE.
 The text can be edited before copying.
 
 ## Scanning a sticker or document

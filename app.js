@@ -73,8 +73,8 @@ function normalize(p) {
     admitDate: date(p.admitDate),
     diagnosis: str(p.diagnosis),
     operations: (Array.isArray(p.operations) ? p.operations : [])
-      .map((o) => ({ name: str(o && o.name), date: date(o && o.date) }))
-      .filter((o) => o.name || o.date),
+      .map((o) => ({ name: str(o && o.name), date: date(o && o.date), diagnosis: str(o && o.diagnosis) }))
+      .filter((o) => o.name || o.date || o.diagnosis),
     docs,
     notes: str(p.notes),
     archived: !!p.archived,
@@ -163,7 +163,7 @@ function visiblePatients() {
     if (p.archived !== (state.view === 'archived')) return false;
     if (state.ward && p.ward !== state.ward) return false;
     if (!q) return true;
-    return [p.name, p.hn, p.ward, p.bed, p.diagnosis, p.notes, ...p.operations.map((o) => o.name)]
+    return [p.name, p.hn, p.ward, p.bed, p.diagnosis, p.notes, ...p.operations.flatMap((o) => [o.name, o.diagnosis])]
       .some((v) => v.toLowerCase().includes(q));
   });
   const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
@@ -226,12 +226,15 @@ function card(p) {
     p.admitDate && `Adm ${fmtDate(p.admitDate)}${!p.archived && day != null && day >= 0 ? ` (day ${day + 1})` : ''}`,
   ].filter(Boolean);
 
+  // Operative note: date and post-op day, then its own diagnosis and operation
+  // as written, kept apart from the patient's (admission) diagnosis above.
   const ops = p.operations.map((o) => {
     const pod = daysSince(o.date);
     const when = o.date ? `${fmtDate(o.date)}${!p.archived && pod != null && pod >= 0 ? `, POD ${pod}` : ''}` : '';
-    // Several lines (as copied from an operative note): date first, then the lines as written.
-    if (o.name.includes('\n')) return h('p', { class: 'line pre' }, h('span', { class: 'tag' }, 'Op'), when && h('span', { class: 'muted' }, ` ${when}`), `\n${o.name}`);
-    return h('p', { class: 'line' }, h('span', { class: 'tag' }, 'Op'), ` ${o.name || 'Operation'}`, when && h('span', { class: 'muted' }, ` — ${when}`));
+    return h('div', { class: 'op-note' },
+      h('p', { class: 'line' }, h('span', { class: 'tag' }, 'Op note'), when && h('span', { class: 'muted' }, ` ${when}`)),
+      o.diagnosis && h('p', { class: 'line pre' }, h('span', { class: 'sub' }, 'Dx'), o.diagnosis.includes('\n') ? `\n${o.diagnosis}` : ` ${o.diagnosis}`),
+      o.name && h('p', { class: 'line pre' }, h('span', { class: 'sub' }, 'Op'), o.name.includes('\n') ? `\n${o.name}` : ` ${o.name}`));
   });
 
   const docChips = DOCS.filter((d) => p.docs[d.id] !== 'na').map((d) => {
@@ -291,14 +294,16 @@ let dirty = false;
 
 // Enough rows to show multi-line text without scrolling inside the box.
 function rowsFor(text) {
-  return Math.min(10, text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 34)), 0));
+  return Math.min(10, (text || '').split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 34)), 0));
 }
 
-function opRow(op = { name: '', date: '' }) {
+function opRow(op = { name: '', date: '', diagnosis: '' }) {
   const row = h('div', { class: 'op-row' },
-    h('label', { class: 'field grow' }, 'Operation', h('textarea', { 'data-op': 'name', rows: rowsFor(op.name) }, op.name)),
-    h('label', { class: 'field' }, 'Date', h('input', { 'data-op': 'date', type: 'date', value: op.date })),
-    h('button', { type: 'button', class: 'icon-btn remove', 'aria-label': 'Remove operation', onclick: () => { row.remove(); dirty = true; } }, '×'));
+    h('div', { class: 'op-row-head' },
+      h('label', { class: 'field' }, 'Date of operation', h('input', { 'data-op': 'date', type: 'date', value: op.date })),
+      h('button', { type: 'button', class: 'icon-btn remove', 'aria-label': 'Remove operative note', onclick: () => { row.remove(); dirty = true; } }, '×')),
+    h('label', { class: 'field' }, 'Diagnosis (operative note)', h('textarea', { 'data-op': 'diagnosis', rows: rowsFor(op.diagnosis || '') }, op.diagnosis || '')),
+    h('label', { class: 'field' }, 'Operation', h('textarea', { 'data-op': 'name', rows: rowsFor(op.name) }, op.name)));
   return row;
 }
 
@@ -354,7 +359,7 @@ form.addEventListener('submit', (e) => {
     name: f.name.value, age: f.age.value, hn: f.hn.value, ward: f.ward.value, bed: f.bed.value,
     admitDate: f.admitDate.value, diagnosis: f.diagnosis.value, notes: f.notes.value,
     operations: [...document.querySelectorAll('#ops .op-row')].map((r) => ({
-      name: $('[data-op="name"]', r).value, date: $('[data-op="date"]', r).value,
+      name: $('[data-op="name"]', r).value, date: $('[data-op="date"]', r).value, diagnosis: $('[data-op="diagnosis"]', r).value,
     })),
     docs,
     updatedAt: Date.now(),
@@ -804,7 +809,7 @@ function applyScan(found) {
     setScanStatus(`This document is for HN ${found.hn}${found.name ? ` (${found.name})` : ''}, but you are editing HN ${existing.hn}. Nothing was changed.`, true);
     return;
   }
-  const labels = { hn: 'HN', name: 'name', age: 'age', ward: 'ward', admitDate: 'admission date', diagnosis: 'diagnosis' };
+  const labels = { hn: 'HN', name: 'name', age: 'age', ward: 'ward', admitDate: 'admission date' };
   const filled = [];
   const unsure = [];
   const mark = (el, k, label) => {
@@ -817,22 +822,24 @@ function applyScan(found) {
     if (!found[k]) continue;
     // A saved patient's identity is not overwritten by a later scan (the
     // sticker or your own typing came first); only gaps are filled.
-    if (existing && k !== 'diagnosis' && existing[k]) continue;
+    if (existing && existing[k]) continue;
     f[k].value = found[k];
-    if (k === 'diagnosis') f[k].rows = Math.max(2, rowsFor(found[k]));
     mark(f[k], k, labels[k]);
   }
-  if (found.opName || found.opDate) {
+  // Everything from an operative note goes into the operative section, so its
+  // diagnosis never replaces the patient's own diagnosis.
+  if (found.opName || found.opDate || found.diagnosis) {
     const rows = [...document.querySelectorAll('#ops .op-row')];
     const get = (r, part) => $(`[data-op="${part}"]`, r);
     // Reuse a row already holding this date (or an empty one) rather than adding a duplicate.
     const loose = (v) => v.toLowerCase().replace(/[^a-z0-9ก-๙]/g, '');
     let row = rows.find((r) => found.opDate && get(r, 'date').value === found.opDate)
       || rows.find((r) => found.opName && loose(get(r, 'name').value) === loose(found.opName))
-      || rows.find((r) => !get(r, 'name').value.trim() && !get(r, 'date').value);
+      || rows.find((r) => !get(r, 'name').value.trim() && !get(r, 'date').value && !get(r, 'diagnosis').value.trim());
     if (!row) { row = opRow(); $('#ops').append(row); }
     if (found.opName) { get(row, 'name').value = found.opName; get(row, 'name').rows = rowsFor(found.opName); mark(get(row, 'name'), 'opName', 'operation'); }
     if (found.opDate) { get(row, 'date').value = found.opDate; mark(get(row, 'date'), 'opDate', 'operation date'); }
+    if (found.diagnosis) { get(row, 'diagnosis').value = found.diagnosis; get(row, 'diagnosis').rows = rowsFor(found.diagnosis); mark(get(row, 'diagnosis'), 'diagnosis', 'operative diagnosis'); }
   }
   if (!filled.length) {
     setScanStatus(existing && (found.hn || found.name)
@@ -887,7 +894,8 @@ function postOpReport(p) {
     `อายุ ${age}`,
     `HN ${p.hn}`,
     '',
-    labelled('Dx', p.diagnosis),
+    // The operative note's own diagnosis; the patient's diagnosis only if that is blank.
+    labelled('Dx', (op && op.diagnosis) || p.diagnosis),
     labelled('Op', op ? op.name : ''),
   ].join('\n');
 }
@@ -895,7 +903,7 @@ function postOpReport(p) {
 const report = $('#report');
 
 function openReport(p) {
-  const missing = [!p.age && 'age', !p.hn && 'HN', !p.diagnosis && 'diagnosis', !(latestOperation(p) || {}).name && 'operation'].filter(Boolean);
+  const missing = [!p.age && 'age', !p.hn && 'HN', !((latestOperation(p) || {}).diagnosis || p.diagnosis) && 'diagnosis', !(latestOperation(p) || {}).name && 'operation'].filter(Boolean);
   $('#reportText').value = postOpReport(p);
   $('#reportNote').textContent = missing.length ? `Not filled in for this patient: ${missing.join(', ')}.` : '';
   $('#reportShare').hidden = !navigator.share;
