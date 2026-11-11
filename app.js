@@ -326,7 +326,7 @@ function closeEditor(force) {
   editor.close();
 }
 
-form.addEventListener('input', (e) => { dirty = true; e.target.classList.remove('scanned'); });
+form.addEventListener('input', (e) => { dirty = true; e.target.classList.remove('scanned', 'unsure'); });
 form.addEventListener('submit', (e) => {
   e.preventDefault();
   const f = form.elements;
@@ -425,13 +425,25 @@ function parsePatientText(raw) {
   const out = {};
 
   const hn = text.match(/H\s*\.?\s*N\s*[.:]?\s*(\d[\d\-\/]{2,12}\d)/i);
+  let hnAt = hn ? hn.index : -1;
   if (hn) out.hn = hn[1].replace(/\s/g, '');
+  else {
+    // Stickers print the number with no "HN" label, at the start of a line,
+    // often followed by a short ward code: "4854909  2TC".
+    const bare = text.match(/(?:^|\n)[^\dก-๙A-Za-z\n]{0,3}(\d{6,9})(?:[ \t]+([A-Za-z0-9]{2,5}))?(?![\d\/\-])/);
+    if (bare) {
+      out.hn = bare[1];
+      hnAt = bare.index;
+      if (bare[2]) out.wardCode = bare[2].toUpperCase();
+    }
+  }
 
   // Name: a line starting with a title. Prefer the one after the HN, so a
   // doctor's name printed earlier on the page is not picked up.
-  const titleRe = /(?:^|[\s:|'"])((?:นางสาว|นาย|นาง|น\.\s?ส\.|ด\.\s?ช\.|ด\.\s?ญ\.|เด็กชาย|เด็กหญิง|Mrs?\.?|Ms\.?|Miss)(?![ก-๙A-Za-z])\s*[^\n]*)/g;
+  // Titles are often printed attached to the name ("น.ส.มณีรัตน์", "นายสมชาย").
+  const titleRe = /(?:^|[\s:|'"])((?:นางสาว|นาย|นาง|น\.\s?ส\.|ด\.\s?ช\.|ด\.\s?ญ\.|เด็กชาย|เด็กหญิง|Mrs?\.?(?![A-Za-z])|Ms\.?(?![A-Za-z])|Miss(?![A-Za-z]))\s*[^\n]*)/g;
   const names = [...text.matchAll(titleRe)].filter((m) => !/^นาย\s*แพทย์/.test(m[1]));
-  const pick = names.find((m) => !hn || m.index > hn.index) || names[0];
+  const pick = names.find((m) => m.index > hnAt) || names[0];
   if (pick) {
     const name = pick[1].split(/\s{2,}|[|:;'"]/)[0].replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
     if (name.split(' ').length > 1) out.name = name;
@@ -488,18 +500,138 @@ async function getOcrWorker(langs) {
   return ocrWorkers[key];
 }
 
-async function readPatientPhoto(canvas, onProgress) {
-  const wanted = ['hn', 'name', 'age', 'admitDate'];
-  ocrProgress = (p) => onProgress(p * 0.6);
-  let worker = await getOcrWorker(['tha', 'eng']);
-  const found = parsePatientText((await worker.recognize(canvas)).data.text);
-  if (wanted.some((k) => !found[k])) {
-    ocrProgress = (p) => onProgress(0.6 + p * 0.4);
-    worker = await getOcrWorker(['tha']);
-    const second = parsePatientText((await worker.recognize(canvas)).data.text);
-    for (const [k, v] of Object.entries(second)) if (!found[k]) found[k] = v;
+// Small or faint photos read better enlarged, in grey, with contrast stretched.
+function enhanceForOcr(src) {
+  const longSide = Math.max(src.width, src.height);
+  const scale = longSide < 1100 ? 2 : 1;
+  const canvas = h('canvas', { width: src.width * scale, height: src.height * scale });
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  const n = canvas.width * canvas.height;
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) {
+    const g = (d[i * 4] * 299 + d[i * 4 + 1] * 587 + d[i * 4 + 2] * 114) / 1000 | 0;
+    d[i * 4] = g;
+    hist[g]++;
   }
+  let lo = 0, hi = 255, acc = 0;
+  while ((acc += hist[lo]) < n * 0.02 && lo < 254) lo++;
+  acc = 0;
+  while ((acc += hist[hi]) < n * 0.3 && hi > lo + 1) hi--;
+  const k = 255 / (hi - lo);
+  for (let i = 0; i < n; i++) {
+    const g = Math.max(0, Math.min(255, (d[i * 4] - lo) * k));
+    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = g;
+    d[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+
+// Most common value; ties go to the earliest reading.
+function vote(values) {
+  const count = new Map();
+  for (const v of values) count.set(v, (count.get(v) || 0) + 1);
+  return [...count.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+function editDistance(a, b) {
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = row[0];
+    row[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return row[b.length];
+}
+
+// The ward code on a sticker is short and easily misread ("2TC" as "270").
+// Trust it when it matches a ward already in the list; otherwise accept it
+// only if it at least looks like a code, or is one slip away from a known ward.
+function pickWard(codes) {
+  if (!codes.length) return '';
+  const known = wardsIn(patients);
+  const exact = codes.map((c) => known.find((w) => w.toUpperCase() === c)).filter(Boolean);
+  if (exact.length) return vote(exact);
+  const near = known.filter((w) => w.length <= 5 && codes.some((c) => c.length === w.length && editDistance(c, w.toUpperCase()) <= 2));
+  if (near.length === 1) return near[0];
+  const lettered = codes.filter((c) => /[A-Z]/.test(c) && /\d/.test(c));
+  return vote(lettered) || '';
+}
+
+// The image is read several ways and the readings are combined, because any
+// single reading can drop a digit or garble a word:
+//  - Thai+English, automatic layout: best for forms and for names
+//  - Thai+English, single block: steadiest for the digits on stickers
+//  - Thai only: steadiest for short Thai words such as month names
+const OCR_PASSES = [[['tha', 'eng'], '3'], [['tha', 'eng'], '6'], [['tha'], '3']];
+
+async function readPatientPhoto(source, onProgress) {
+  const canvas = enhanceForOcr(source);
+  const readings = [];
+  for (let i = 0; i < OCR_PASSES.length; i++) {
+    const [langs, layout] = OCR_PASSES[i];
+    const worker = await getOcrWorker(langs);
+    ocrProgress = (p) => onProgress((i + p) / OCR_PASSES.length);
+    await worker.setParameters({ tessedit_pageseg_mode: layout });
+    readings.push(parsePatientText((await worker.recognize(canvas)).data.text));
+  }
+  const all = (k) => readings.map((r) => r[k]).filter(Boolean);
+  const found = {};
+  const unsure = [];
+  // A field is trusted only when at least two readings produced it and all agree.
+  const settle = (k, values, chosen) => {
+    if (!chosen) return;
+    found[k] = chosen;
+    if (values.length < 2 || values.some((v) => v !== chosen)) unsure.push(k);
+  };
+
+  let hns = all('hn');
+  const barcode = await readBarcodeDigits(source);
+  if (barcode && (!hns.length || hns.some((x) => barcode.includes(x) || editDistance(barcode, x) <= 2))) {
+    found.hn = barcode;
+  } else if (hns.length) {
+    // A number that is merely a piece of a longer reading lost a digit. Among
+    // the rest prefer the length your other patients' numbers have, else the longest.
+    let pool = hns.filter((x) => !hns.some((y) => y !== x && y.includes(x)));
+    const usual = vote(patients.map((p) => p.hn.length).filter((n) => n >= 6));
+    const longest = Math.max(...pool.map((x) => x.length));
+    const preferred = pool.filter((x) => x.length === usual);
+    pool = preferred.length ? preferred : pool.filter((x) => x.length === longest);
+    settle('hn', hns, vote(pool));
+  }
+
+  for (const k of ['name', 'age', 'admitDate']) settle(k, all(k), vote(all(k)));
+  const codes = all('wardCode');
+  settle('ward', codes.length > 1 && codes.every((c) => c === codes[0]) ? [1, 1] : [1, 2], pickWard(codes));
+  found.unsure = unsure;
   return found;
+}
+
+// A barcode, when one is in the photo and sharp enough, gives the number
+// exactly. It is only trusted when it agrees with (or stands in for) the
+// printed number, since some barcodes carry a different number.
+async function readBarcodeDigits(canvas) {
+  try {
+    if (!window.ZXingWASM) {
+      await loadScript('vendor/zxing/zxing-reader.js');
+      const dir = new URL('vendor/zxing/', location.href).href;
+      window.ZXingWASM.prepareZXingModule({ overrides: { locateFile: (path, prefix) => (path.endsWith('.wasm') ? dir + path : prefix + path) } });
+    }
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const results = await window.ZXingWASM.readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), { tryHarder: true, maxNumberOfSymbols: 4 });
+    const hit = results.map((r) => r.text.trim()).find((t) => /^\d{6,9}$/.test(t));
+    return hit || '';
+  } catch (e) {
+    return '';
+  }
 }
 
 // Phone photos are far larger than needed; shrink before recognising.
@@ -525,7 +657,7 @@ function setScanStatus(msg, warn) {
 }
 
 function clearScanMarks() {
-  for (const el of form.querySelectorAll('.scanned')) el.classList.remove('scanned');
+  for (const el of form.querySelectorAll('.scanned')) el.classList.remove('scanned', 'unsure');
 }
 
 $('#scanBtn').addEventListener('click', () => $('#scanFile').click());
@@ -549,14 +681,16 @@ $('#scanFile').addEventListener('change', async (e) => {
 
 function applyScan(found) {
   const f = form.elements;
-  const labels = { hn: 'HN', name: 'name', age: 'age', admitDate: 'admission date' };
+  const labels = { hn: 'HN', name: 'name', age: 'age', ward: 'ward', admitDate: 'admission date' };
   const filled = [];
+  const unsure = [];
   clearScanMarks();
   for (const k of Object.keys(labels)) {
     if (!found[k]) continue;
     f[k].value = found[k];
     f[k].classList.add('scanned');
     filled.push(labels[k]);
+    if (found.unsure.includes(k)) { f[k].classList.add('unsure'); unsure.push(labels[k]); }
   }
   if (!filled.length) {
     setScanStatus('No patient details found. Move closer to the printed block, keep the text level and avoid shadows, then try again.', true);
@@ -565,9 +699,11 @@ function applyScan(found) {
   dirty = true;
   f.name.classList.remove('invalid');
   const dup = found.hn && patients.find((p) => p.hn === found.hn && p.id !== editingId);
-  setScanStatus(dup
-    ? `HN ${found.hn} is already in your list (${dup.name}${dup.archived ? ', archived' : ''}). Filled: ${filled.join(', ')}.`
-    : `Filled: ${filled.join(', ')}. Please check them against the paper — handwriting (ward, diagnosis, operation) is not read.`, !!dup);
+  const parts = [`Filled: ${filled.join(', ')}.`];
+  if (dup) parts.unshift(`HN ${found.hn} is already in your list (${dup.name}${dup.archived ? ', archived' : ''}).`);
+  if (unsure.length) parts.push(`Not read clearly, shown in amber: ${unsure.join(', ')}. A closer, sharper photo helps.`);
+  parts.push('Check everything against the paper — handwriting is not read.');
+  setScanStatus(parts.join(' '), !!dup || unsure.length > 0);
 }
 
 /* ---------- toolbar ---------- */

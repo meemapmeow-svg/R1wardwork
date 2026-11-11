@@ -19,15 +19,23 @@ patient can be archived, which moves them out of the active list.
 ## Scanning a sticker or sheet header
 
 In the patient form, **Scan sticker or sheet header** takes a photo (or picks
-one) and fills in what it can read from the printed patient block: HN, name,
-age and admission date. Thai dates in the Buddhist era are converted.
+one) and fills in what it can read from the printed patient block:
 
-- The reading happens on the phone itself (Tesseract OCR bundled in
-  `vendor/tesseract/`). The photo is not uploaded and not kept.
-- Handwriting — ward, diagnosis, operation — is not read; type those in.
+- **Order-sheet / first-page header** — HN, name, age, admission date
+  (Buddhist-era dates are converted).
+- **Patient sticker** — HN, ward code, name, age. If the barcode is sharp
+  enough it is decoded and used to confirm the HN.
+
+How it behaves:
+
+- The reading happens on the phone itself (Tesseract OCR and the ZXing barcode
+  reader, bundled in `vendor/`). The photo is not uploaded and not kept.
+- The photo is read several ways and the results compared. Fields the readings
+  disagree on are filled in amber — check those first.
+- Handwriting (diagnosis, operation, a handwritten ward) is not read.
 - Always check the filled fields against the paper. Thai names in particular
   can come out with a wrong letter. Fill the frame with the printed block,
-  keep it level and avoid shadows for the best result.
+  keep it level and sharp, and avoid shadows and glare.
 
 ## Using it on a phone
 

@@ -274,6 +274,8 @@ legend {
 .scan .hint.warn { color: var(--warn); }
 .field input.scanned, .field textarea.scanned { border-color: var(--accent); background: var(--accent-soft); }
 
+.field input.scanned.unsure, .field textarea.scanned.unsure { border-color: var(--warn); background: var(--warn-soft); }
+
 .hint { color: var(--muted); font-size: .88rem; margin: 0 0 14px; }
 .hint:empty { display: none; }
 
