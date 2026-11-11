@@ -101,7 +101,10 @@
         <fieldset>
           <legend>Operative note</legend>
           <div id="ops"></div>
-          <button type="button" class="ghost-btn" id="addOpBtn">+ Add operative note</button>
+          <div class="btn-row">
+            <button type="button" class="ghost-btn" id="scanOpBtn">Scan operative note</button>
+            <button type="button" class="ghost-btn" id="addOpBtn">+ Add by hand</button>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -128,6 +131,10 @@
   <dialog id="scanner" class="scanner">
     <video id="scanVideo" playsinline muted autoplay></video>
     <button type="button" class="scanner-close" id="scannerClose" aria-label="Close scanner">×</button>
+    <div class="scanner-modes" role="group" aria-label="What to scan">
+      <button type="button" data-scan-mode="auto" aria-pressed="true">Sticker / auto</button>
+      <button type="button" data-scan-mode="opnote" aria-pressed="false">Operative note</button>
+    </div>
     <div class="scanner-panel">
       <p id="scannerMsg" role="status" aria-live="polite"></p>
       <div class="scanner-controls">

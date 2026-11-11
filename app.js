@@ -804,8 +804,30 @@ let scanOnResult = null;
 
 function setScannerMsg(msg) { $('#scannerMsg').textContent = msg; }
 
-async function openScanner(onResult) {
+// Two ways to scan. "auto" captures by itself on a barcode and accepts any
+// document. "opnote" is for a full operative-note page: it waits for the
+// shutter so the whole page can be framed first, and only accepts a picture
+// in which the note's diagnosis, operation or date was actually found.
+const SCAN_MODES = {
+  auto: { hint: SCAN_HINT, need: SCAN_FIELDS, none: 'Nothing readable in that picture. Move closer, keep the text level and avoid shadows.' },
+  opnote: {
+    hint: 'Operative note: fit the page in view from the top down to the Diagnosis / Operation block, hold steady, then tap the button.',
+    need: ['diagnosis', 'opName', 'opDate'],
+    none: 'No operative note details found in that picture. Make sure the Diagnosis / Operation block is in view and sharp, then try again.',
+  },
+};
+let scanMode = 'auto';
+
+function setScanMode(mode) {
+  scanMode = mode;
+  scanLastCode = null;
+  for (const b of document.querySelectorAll('[data-scan-mode]')) b.setAttribute('aria-pressed', String(b.dataset.scanMode === mode));
+  if (!scanBusy && !scanner.classList.contains('no-camera') && scanStream) setScannerMsg(SCAN_MODES[mode].hint);
+}
+
+async function openScanner(onResult, mode = 'auto') {
   scanOnResult = onResult;
+  setScanMode(mode);
   scanBusy = false;
   scanLastCode = null;
   scanner.classList.remove('busy', 'no-camera');
@@ -821,7 +843,7 @@ async function openScanner(onResult) {
     scanStream = stream;
     scanVideo.srcObject = stream;
     await scanVideo.play();
-    setScannerMsg(SCAN_HINT);
+    setScannerMsg(SCAN_MODES[scanMode].hint);
     watchForBarcode();
   } catch (e) {
     scanner.classList.add('no-camera');
@@ -861,7 +883,7 @@ async function watchForBarcode() {
     const steady = code && scanLastCode && code.text === scanLastCode.text
       && Math.abs(code.left - scanLastCode.left) < frame.width * 0.04
       && Math.abs(code.y - scanLastCode.y) < frame.width * 0.04;
-    if (steady) { captureFrame(); return; }
+    if (steady && scanMode === 'auto') { captureFrame(); return; }
     scanLastCode = code;
   }
   scanTimer = setTimeout(watchForBarcode, 250);
@@ -887,8 +909,8 @@ async function readCaptured(source) {
     return;
   }
   if (!scanner.open) return;
-  if (!SCAN_FIELDS.some((k) => found[k])) {
-    resumeScanner('Nothing readable in that picture. Move closer, keep the text level and avoid shadows.');
+  if (!SCAN_MODES[scanMode].need.some((k) => found[k])) {
+    resumeScanner(SCAN_MODES[scanMode].none);
     return;
   }
   const done = scanOnResult;
@@ -923,6 +945,8 @@ $('#scanFile').addEventListener('change', async (e) => {
 
 // From inside a patient's form: fill that form.
 $('#scanBtn').addEventListener('click', () => openScanner((found) => applyScan(found)));
+$('#scanOpBtn').addEventListener('click', () => openScanner((found) => applyScan(found), 'opnote'));
+for (const b of document.querySelectorAll('[data-scan-mode]')) b.addEventListener('click', () => setScanMode(b.dataset.scanMode));
 
 // From the main screen: find whose document it is. An exact HN match opens
 // that patient; otherwise a new patient is started from what was read.

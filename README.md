@@ -39,6 +39,13 @@ sticker, or on a page that carries one) it takes the picture by itself. For
 anything else, tap the round button, or use **Choose photo**. If the camera is
 not available, **Choose photo** still works.
 
+The camera view has two settings, switchable at the top: **Sticker / auto**
+(the default) and **Operative note**. The operative-note setting never
+captures by itself — frame the page, then tap the button — and only accepts a
+picture in which the note's diagnosis, operation or date was found. The
+**Scan operative note** button in a patient's Operative note section opens
+the camera already on that setting.
+
 What it reads from the printed patient block:
 
 - **Order-sheet / first-page header** — HN, name, age, admission date
