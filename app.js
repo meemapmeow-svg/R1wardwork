@@ -288,7 +288,7 @@ let dirty = false;
 
 function opRow(op = { name: '', date: '' }) {
   const row = h('div', { class: 'op-row' },
-    h('label', { class: 'field grow' }, 'Operation', h('input', { 'data-op': 'name', value: op.name, autocomplete: 'off' })),
+    h('label', { class: 'field grow' }, 'Operation', h('textarea', { 'data-op': 'name', rows: op.name.length > 40 ? 3 : 1 }, op.name)),
     h('label', { class: 'field' }, 'Date', h('input', { 'data-op': 'date', type: 'date', value: op.date })),
     h('button', { type: 'button', class: 'icon-btn remove', 'aria-label': 'Remove operation', onclick: () => { row.remove(); dirty = true; } }, '×'));
   return row;
@@ -365,7 +365,7 @@ $('#addOpBtn').addEventListener('click', () => {
   const row = opRow();
   $('#ops').append(row);
   dirty = true;
-  $('input', row).focus();
+  $('textarea', row).focus();
 });
 $('#archiveBtn').addEventListener('click', () => {
   const p = patients.find((x) => x.id === editingId);
@@ -412,7 +412,8 @@ function toIsoDate(d, m, y) {
 // First date found in a short piece of text: "5 พ.ย. 2569", "05/11/2569", "5 Nov 2026".
 function findDate(text) {
   let m = text.match(/(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{4}|\d{2})(?!\d)/);
-  if (m) return toIsoDate(+m[1], +m[2], +m[3]);
+  // A two-digit "25" is far more likely a Buddhist-era year cut short (25xx) than 2025.
+  if (m) return m[3].length === 2 && +m[3] >= 20 && +m[3] < 40 ? '' : toIsoDate(+m[1], +m[2], +m[3]);
   m = text.match(/(\d{1,2})\s*([^\d\n]{2,14}?)\s*(\d{4}|\d{2})(?!\d)/);
   if (!m) return '';
   const word = m[2].replace(/[\s.,]/g, '').toLowerCase();
@@ -462,6 +463,37 @@ function parsePatientText(raw) {
 
   const adm = text.match(/(?:วันที่\s*เข้า\s*รับ\s*บริการ|วันที่\s*รับ\s*(?:ไว้|เข้า)?|วัน\s*Admit|Admi(?:t|ssion)(?:ted)?\s*(?:date)?|รับไว้)\s*[:.]?\s*([^\n]{4,24})/i);
   if (adm) { const d = findDate(adm[1]); if (d) out.admitDate = d; }
+
+  // Operative note: the date, and the free-text "Diagnosis :" / "Operation :"
+  // block. The coded PREOPERATIVE / POSTOPERATIVE DIAGNOSIS lines are skipped.
+  const opDate = text.match(/Date\s*of\s*Operation\s*[:.]?\s*([^\n]{4,30})/i);
+  if (opDate) {
+    const d = findDate(opDate[1]);
+    if (d) out.opDate = d;
+    // The year is often printed over a dotted line and misread; keep day/month separately.
+    const dm = opDate[1].match(/^\D{0,3}(\d{1,2})\s*\/\s*(\d{1,2})\s*\//);
+    if (dm && +dm[1] >= 1 && +dm[1] <= 31 && +dm[2] >= 1 && +dm[2] <= 12) out.opDayMonth = `${+dm[2]}-${+dm[1]}`;
+  }
+
+  const tidy = (v) => v.replace(/\s+/g, ' ').replace(/^[\s\-–.:;]+|[\s\-–:;|]+$/g, '');
+  const lines = text.split('\n');
+  const dxLine = lines.find((l) => /^[^A-Za-z]{0,3}Diagnosis\s*[:;]/i.test(l));
+  if (dxLine) { const dx = tidy(dxLine.replace(/^.*?Diagnosis\s*[:;]/i, '')); if (dx.length > 2) out.diagnosis = dx; }
+
+  const opAt = lines.findIndex((l) => /^[^A-Za-z]{0,3}Operation\s*[:;]/i.test(l));
+  if (opAt >= 0) {
+    const items = [];
+    const inline = tidy(lines[opAt].replace(/^.*?Operation\s*[:;]/i, ''));
+    if (inline.length > 2) items.push(inline.replace(/^\d{1,2}\s*[).]\s*/, ''));
+    for (const l of lines.slice(opAt + 1)) {
+      if (!l.trim()) continue;
+      const item = l.match(/^\s*\d{1,2}\s*[).]\s*(.+)/);
+      if (item) items.push(tidy(item[1]));
+      else if (!items.length && !/^\s*(Implant|Procedure|Finding)/i.test(l)) { items.push(tidy(l)); break; }
+      else break;
+    }
+    if (items.length) out.opName = items.join('; ');
+  }
 
   // The birth date is a second source for age and is read more reliably
   // than a lone two-digit number, so it wins when present.
@@ -649,6 +681,31 @@ async function readPatientPhoto(source, onProgress) {
   }
 
   for (const k of ['name', 'age', 'admitDate']) settle(k, all(k), vote(all(k)));
+
+  // Operation date. Day and month read well; the year often does not. A full
+  // date is accepted when it is recent. Otherwise the year is filled in as the
+  // latest one that does not put the operation in the future, and flagged.
+  const dayMonth = vote(all('opDayMonth'));
+  const recent = all('opDate').filter((d) => {
+    const ago = daysSince(d);
+    const [, m, day] = d.split('-').map(Number);
+    return ago >= 0 && ago <= 60 && (!dayMonth || dayMonth === `${m}-${day}`);
+  });
+  if (recent.length) settle('opDate', recent, vote(recent));
+  else if (dayMonth) {
+    const [m, day] = dayMonth.split('-').map(Number);
+    const now = new Date();
+    let guess = toIsoDate(day, m, now.getFullYear());
+    if (!guess || daysSince(guess) < 0) guess = toIsoDate(day, m, now.getFullYear() - 1);
+    settle('opDate', [], guess);
+  }
+  // Longer text: readings that differ only in spacing or punctuation count as agreeing.
+  for (const k of ['diagnosis', 'opName']) {
+    const loose = (v) => v.toLowerCase().replace(/[^a-z0-9ก-๙]/g, '');
+    const key = vote(all(k).map(loose));
+    settle(k, all(k).map(loose), key);
+    if (key) found[k] = all(k).find((v) => loose(v) === key);
+  }
   const codes = all('wardCode');
   settle('ward', codes.length > 1 && codes.every((c) => c === codes[0]) ? [1, 1] : [1, 2], pickWard(codes));
   found.unsure = unsure;
@@ -726,26 +783,53 @@ $('#scanFile').addEventListener('change', async (e) => {
 
 function applyScan(found) {
   const f = form.elements;
-  const labels = { hn: 'HN', name: 'name', age: 'age', ward: 'ward', admitDate: 'admission date' };
+  const existing = patients.find((p) => p.id === editingId);
+  // Scanning into a saved patient: refuse a document that belongs to someone else.
+  if (existing && existing.hn && found.hn && editDistance(existing.hn, found.hn) > 2) {
+    clearScanMarks();
+    setScanStatus(`This document is for HN ${found.hn}${found.name ? ` (${found.name})` : ''}, but you are editing HN ${existing.hn}. Nothing was changed.`, true);
+    return;
+  }
+  const labels = { hn: 'HN', name: 'name', age: 'age', ward: 'ward', admitDate: 'admission date', diagnosis: 'diagnosis' };
   const filled = [];
   const unsure = [];
+  const mark = (el, k, label) => {
+    el.classList.add('scanned');
+    if (!filled.includes(label)) filled.push(label);
+    if (found.unsure.includes(k)) { el.classList.add('unsure'); if (!unsure.includes(label)) unsure.push(label); }
+  };
   clearScanMarks();
   for (const k of Object.keys(labels)) {
     if (!found[k]) continue;
+    // A saved patient's identity is not overwritten by a later scan (the
+    // sticker or your own typing came first); only gaps are filled.
+    if (existing && k !== 'diagnosis' && existing[k]) continue;
     f[k].value = found[k];
-    f[k].classList.add('scanned');
-    filled.push(labels[k]);
-    if (found.unsure.includes(k)) { f[k].classList.add('unsure'); unsure.push(labels[k]); }
+    mark(f[k], k, labels[k]);
+  }
+  if (found.opName || found.opDate) {
+    const rows = [...document.querySelectorAll('#ops .op-row')];
+    const get = (r, part) => $(`[data-op="${part}"]`, r);
+    // Reuse a row already holding this date (or an empty one) rather than adding a duplicate.
+    const loose = (v) => v.toLowerCase().replace(/[^a-z0-9ก-๙]/g, '');
+    let row = rows.find((r) => found.opDate && get(r, 'date').value === found.opDate)
+      || rows.find((r) => found.opName && loose(get(r, 'name').value) === loose(found.opName))
+      || rows.find((r) => !get(r, 'name').value.trim() && !get(r, 'date').value);
+    if (!row) { row = opRow(); $('#ops').append(row); }
+    if (found.opName) { get(row, 'name').value = found.opName; get(row, 'name').rows = found.opName.length > 40 ? 3 : 1; mark(get(row, 'name'), 'opName', 'operation'); }
+    if (found.opDate) { get(row, 'date').value = found.opDate; mark(get(row, 'date'), 'opDate', 'operation date'); }
   }
   if (!filled.length) {
-    setScanStatus('No patient details found. Move closer to the printed block, keep the text level and avoid shadows, then try again.', true);
+    setScanStatus(existing && (found.hn || found.name)
+      ? 'Nothing new on this document for this patient.'
+      : 'No patient details found. Move closer to the printed block, keep the text level and avoid shadows, then try again.', true);
     return;
   }
   dirty = true;
   f.name.classList.remove('invalid');
   const dup = found.hn && patients.find((p) => p.hn === found.hn && p.id !== editingId);
   const parts = [`Filled: ${filled.join(', ')}.`];
-  if (dup) parts.unshift(`HN ${found.hn} is already in your list (${dup.name}${dup.archived ? ', archived' : ''}).`);
+  if (dup) parts.unshift(`HN ${found.hn} is already in your list (${dup.name}${dup.archived ? ', archived' : ''}) — open that patient and scan there to add to it.`);
   if (unsure.length) parts.push(`Not read clearly, shown in amber: ${unsure.join(', ')}. A closer, sharper photo helps.`);
   parts.push('Check everything against the paper — handwriting is not read.');
   setScanStatus(parts.join(' '), !!dup || unsure.length > 0);

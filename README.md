@@ -16,15 +16,23 @@ A small mobile-friendly app for keeping track of ward patients and their paperwo
 Tap a document on a patient card to tick it off. When everything is done the
 patient can be archived, which moves them out of the active list.
 
-## Scanning a sticker or sheet header
+## Scanning a sticker or document
 
-In the patient form, **Scan sticker or sheet header** takes a photo (or picks
+In the patient form, **Scan sticker or document** takes a photo (or picks
 one) and fills in what it can read from the printed patient block:
 
 - **Order-sheet / first-page header** — HN, name, age, admission date
   (Buddhist-era dates are converted).
 - **Patient sticker** — HN, ward code, name, age. If the barcode is sharp
   enough it is decoded and used to confirm the HN.
+
+- **Operative note** — operation date, and the free-text `Diagnosis :` and
+  `Operation :` block (numbered items are joined into one operation entry).
+  The coded pre/post-operative diagnosis lines are ignored.
+
+To add an operative note to a patient already in the list, open that patient
+and scan from there: their name, HN and ward are left as they are, only gaps
+are filled, and a note belonging to a different HN is refused.
 
 How it behaves:
 
