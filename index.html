@@ -45,6 +45,9 @@
 
   <main id="list" class="list"></main>
 
+  <button id="scanFab" class="fab fab-scan" aria-label="Scan a sticker or document">
+    <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M7 12h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  </button>
   <button id="addBtn" class="fab" aria-label="Add patient">
     <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
   </button>
@@ -63,7 +66,6 @@
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M7 12h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             Scan sticker or document
           </button>
-          <input type="file" id="scanFile" accept="image/*" hidden>
           <p class="hint" id="scanStatus" role="status" aria-live="polite"></p>
         </div>
         <fieldset>
@@ -120,6 +122,21 @@
         </div>
       </div>
     </form>
+  </dialog>
+
+  <!-- Live scanner -->
+  <dialog id="scanner" class="scanner">
+    <video id="scanVideo" playsinline muted autoplay></video>
+    <button type="button" class="scanner-close" id="scannerClose" aria-label="Close scanner">×</button>
+    <div class="scanner-panel">
+      <p id="scannerMsg" role="status" aria-live="polite"></p>
+      <div class="scanner-controls">
+        <button type="button" class="scanner-pick" id="scannerPick">Choose photo</button>
+        <button type="button" class="scanner-shutter" id="scannerShutter" aria-label="Take picture"></button>
+        <span></span>
+      </div>
+      <input type="file" id="scanFile" accept="image/*" hidden>
+    </div>
   </dialog>
 
   <!-- Post-op report -->
