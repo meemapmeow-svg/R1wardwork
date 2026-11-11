@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ward Work</title>
+  <meta name="description" content="Track ward patients and their paperwork. Data stays on this device.">
+  <meta name="theme-color" content="#0f766e" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1416" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Ward Work">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-row">
+      <h1>Ward Work</h1>
+      <button id="menuBtn" class="icon-btn" aria-label="Backup and settings" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+      </button>
+    </div>
+    <p id="summary" class="summary" aria-live="polite"></p>
+    <input id="search" class="search" type="search" placeholder="Search name, HN, bed, diagnosis…" autocomplete="off" aria-label="Search patients">
+    <div class="controls">
+      <div class="segmented" role="tablist" aria-label="Patient list">
+        <button role="tab" data-view="active" aria-selected="true">Active</button>
+        <button role="tab" data-view="archived" aria-selected="false">Archived</button>
+      </div>
+      <label class="sort">
+        <span class="visually-hidden">Sort by</span>
+        <select id="sort">
+          <option value="pending">Most pending first</option>
+          <option value="ward">Ward</option>
+          <option value="admit">Newest admission</option>
+          <option value="name">Name</option>
+        </select>
+      </label>
+    </div>
+    <div id="wardChips" class="chips-row" aria-label="Filter by ward"></div>
+  </header>
+
+  <main id="list" class="list"></main>
+
+  <button id="addBtn" class="fab" aria-label="Add patient">
+    <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
+  </button>
+
+  <!-- Patient editor -->
+  <dialog id="editor" class="sheet">
+    <form id="patientForm" novalidate>
+      <div class="sheet-head">
+        <button type="button" class="text-btn" id="cancelBtn">Cancel</button>
+        <h2 id="editorTitle">New patient</h2>
+        <button type="submit" class="text-btn strong">Save</button>
+      </div>
+      <div class="sheet-body">
+        <div class="scan">
+          <button type="button" class="block-btn scan-btn" id="scanBtn">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M7 12h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Scan sticker or document
+          </button>
+          <input type="file" id="scanFile" accept="image/*" hidden>
+          <p class="hint" id="scanStatus" role="status" aria-live="polite"></p>
+        </div>
+        <fieldset>
+          <legend>Patient</legend>
+          <label class="field">Name
+            <input name="name" required autocomplete="off" enterkeyhint="next">
+          </label>
+          <div class="grid2">
+            <label class="field">Age
+              <input name="age" inputmode="numeric" autocomplete="off" placeholder="years">
+            </label>
+            <label class="field">HN
+              <input name="hn" inputmode="numeric" autocomplete="off">
+            </label>
+          </div>
+          <div class="grid2">
+            <label class="field">Ward
+              <input name="ward" list="wardList" autocomplete="off">
+              <datalist id="wardList"></datalist>
+            </label>
+            <label class="field">Bed
+              <input name="bed" autocomplete="off">
+            </label>
+          </div>
+          <label class="field">Admission date
+            <input name="admitDate" type="date">
+          </label>
+          <label class="field">Diagnosis
+            <textarea name="diagnosis" rows="2"></textarea>
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Operations</legend>
+          <div id="ops"></div>
+          <button type="button" class="ghost-btn" id="addOpBtn">+ Add operation</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Document checklist</legend>
+          <div id="docRows"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Notes</legend>
+          <label class="field"><span class="visually-hidden">Notes</span>
+            <textarea name="notes" rows="2" placeholder="Anything else to remember"></textarea>
+          </label>
+        </fieldset>
+
+        <div class="danger-zone" id="editorActions" hidden>
+          <button type="button" class="ghost-btn" id="archiveBtn">Archive patient</button>
+          <button type="button" class="ghost-btn danger" id="deleteBtn">Delete patient</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Post-op report -->
+  <dialog id="report" class="sheet small">
+    <div class="sheet-head">
+      <span></span>
+      <h2>Post-op report</h2>
+      <button type="button" class="text-btn strong" id="reportClose">Close</button>
+    </div>
+    <div class="sheet-body">
+      <label class="field"><span class="visually-hidden">Report text</span>
+        <textarea id="reportText" rows="15" spellcheck="false"></textarea>
+      </label>
+      <p class="hint warn-text" id="reportNote"></p>
+      <button type="button" class="block-btn primary" id="reportCopy">Copy to clipboard</button>
+      <button type="button" class="block-btn" id="reportShare">Share to an app…</button>
+    </div>
+  </dialog>
+
+  <!-- Backup menu -->
+  <dialog id="menu" class="sheet small">
+    <div class="sheet-head">
+      <span></span>
+      <h2>Backup &amp; data</h2>
+      <button type="button" class="text-btn strong" id="menuClose">Done</button>
+    </div>
+    <div class="sheet-body">
+      <p class="hint">Everything is stored only on this device, inside this browser. Nothing is uploaded. Export a backup regularly — clearing browser data or losing the phone erases the list.</p>
+      <button type="button" class="block-btn" id="exportBtn">Export backup file</button>
+      <button type="button" class="block-btn" id="importBtn">Import backup file</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+      <p class="hint" id="storageNote"></p>
+      <p class="hint">Backup files contain patient-identifiable information. Keep them somewhere your hospital's policy allows.</p>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
