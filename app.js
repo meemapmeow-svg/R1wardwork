@@ -317,7 +317,7 @@ function docRow(d, value) {
         h('span', null, text)))));
 }
 
-function openEditor(p) {
+function openEditor(p, opts = {}) {
   editingId = p ? p.id : null;
   const data = p || normalize({ ward: state.ward, admitDate: todayStr() });
   $('#editorTitle').textContent = p ? 'Edit patient' : 'New patient';
@@ -333,7 +333,7 @@ function openEditor(p) {
   dirty = false;
   editor.showModal();
   $('.sheet-body', editor).scrollTop = 0;
-  if (!p) form.elements.name.focus();
+  if (!p && !opts.quiet) form.elements.name.focus();
 }
 
 function closeEditor(force) {
@@ -754,7 +754,16 @@ async function readBarcode(canvas) {
   }
 }
 
-// Phone photos are far larger than needed; shrink before recognising.
+// Photos and camera frames are far larger than needed; shrink before
+// recognising, but keep the original so a small sticker can be cut out sharp.
+function prepareSource(img) {
+  const scale = Math.min(1, 2400 / Math.max(img.width, img.height));
+  const canvas = h('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  canvas.fullImage = img;
+  return canvas;
+}
+
 async function photoToCanvas(file) {
   let img;
   try { img = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
@@ -764,11 +773,7 @@ async function photoToCanvas(file) {
     await img.decode();
     URL.revokeObjectURL(img.src);
   }
-  const scale = Math.min(1, 2400 / Math.max(img.width, img.height));
-  const canvas = h('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
-  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-  canvas.fullImage = img; // kept so a small sticker can be cut out at full resolution
-  return canvas;
+  return prepareSource(img);
 }
 
 function setScanStatus(msg, warn) {
@@ -781,26 +786,155 @@ function clearScanMarks() {
   for (const el of form.querySelectorAll('.scanned')) el.classList.remove('scanned', 'unsure');
 }
 
-$('#scanBtn').addEventListener('click', () => $('#scanFile').click());
+/* ---------- live scanner ---------- */
+
+// A camera view that takes the picture by itself once it sees a patient
+// barcode held steady (stickers, and pages that carry one). Anything else is
+// captured with the shutter button, or picked from the photo library.
+
+const scanner = $('#scanner');
+const scanVideo = $('#scanVideo');
+const SCAN_HINT = 'Point at a sticker — it captures by itself. For a page without a barcode, fill the frame and tap the button.';
+const SCAN_FIELDS = ['hn', 'name', 'age', 'ward', 'admitDate', 'diagnosis', 'opName', 'opDate'];
+let scanStream = null;
+let scanTimer = 0;
+let scanBusy = false;
+let scanLastCode = null;
+let scanOnResult = null;
+
+function setScannerMsg(msg) { $('#scannerMsg').textContent = msg; }
+
+async function openScanner(onResult) {
+  scanOnResult = onResult;
+  scanBusy = false;
+  scanLastCode = null;
+  scanner.classList.remove('busy', 'no-camera');
+  setScannerMsg('Starting camera…');
+  scanner.showModal();
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('no camera api');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } },
+    });
+    if (!scanner.open) { stream.getTracks().forEach((t) => t.stop()); return; }
+    scanStream = stream;
+    scanVideo.srcObject = stream;
+    await scanVideo.play();
+    setScannerMsg(SCAN_HINT);
+    watchForBarcode();
+  } catch (e) {
+    scanner.classList.add('no-camera');
+    setScannerMsg('The camera is not available here. Use “Choose photo” to take or pick a picture instead.');
+  }
+}
+
+function stopCamera() {
+  clearTimeout(scanTimer);
+  if (scanStream) scanStream.getTracks().forEach((t) => t.stop());
+  scanStream = null;
+  scanVideo.srcObject = null;
+}
+
+function closeScanner() {
+  stopCamera();
+  if (scanner.open) scanner.close();
+}
+
+function grabFrame(maxSide) {
+  const w = scanVideo.videoWidth;
+  const ht = scanVideo.videoHeight;
+  const scale = Math.min(1, maxSide / Math.max(w, ht));
+  const canvas = h('canvas', { width: Math.round(w * scale), height: Math.round(ht * scale) });
+  canvas.getContext('2d', { willReadFrequently: true }).drawImage(scanVideo, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+// Look at a small copy of the current frame a few times a second. Capture when
+// the same barcode shows up twice in nearly the same place, i.e. held steady.
+async function watchForBarcode() {
+  if (!scanStream || scanBusy) return;
+  if (scanVideo.videoWidth) {
+    const frame = grabFrame(1920); // smaller frames lose the thin bars of a sticker barcode
+    const code = await readBarcode(frame);
+    if (!scanStream || scanBusy) return;
+    const steady = code && scanLastCode && code.text === scanLastCode.text
+      && Math.abs(code.left - scanLastCode.left) < frame.width * 0.04
+      && Math.abs(code.y - scanLastCode.y) < frame.width * 0.04;
+    if (steady) { captureFrame(); return; }
+    scanLastCode = code;
+  }
+  scanTimer = setTimeout(watchForBarcode, 250);
+}
+
+function captureFrame() {
+  if (scanBusy || !scanStream || !scanVideo.videoWidth) return;
+  scanBusy = true;
+  const full = grabFrame(Infinity);
+  scanVideo.pause();
+  readCaptured(prepareSource(full));
+}
+
+async function readCaptured(source) {
+  scanner.classList.add('busy');
+  setScannerMsg('Reading… (the first time takes longer)');
+  let found = null;
+  try {
+    found = await readPatientPhoto(source, (p) => setScannerMsg(`Reading… ${Math.round(p * 100)}%`));
+  } catch (err) {
+    for (const k of Object.keys(ocrWorkers)) delete ocrWorkers[k];
+    resumeScanner('Could not read the picture. If this is the first scan, it needs an internet connection once to load the reader.');
+    return;
+  }
+  if (!scanner.open) return;
+  if (!SCAN_FIELDS.some((k) => found[k])) {
+    resumeScanner('Nothing readable in that picture. Move closer, keep the text level and avoid shadows.');
+    return;
+  }
+  const done = scanOnResult;
+  closeScanner();
+  done(found);
+}
+
+function resumeScanner(msg) {
+  scanBusy = false;
+  scanLastCode = null;
+  scanner.classList.remove('busy');
+  setScannerMsg(msg);
+  if (scanStream) { scanVideo.play().catch(() => {}); scanTimer = setTimeout(watchForBarcode, 1500); }
+}
+
+scanner.addEventListener('close', stopCamera);
+$('#scannerClose').addEventListener('click', closeScanner);
+$('#scannerShutter').addEventListener('click', captureFrame);
+$('#scannerPick').addEventListener('click', () => $('#scanFile').click());
 $('#scanFile').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
-  if (!file) return;
-  const btn = $('#scanBtn');
-  btn.disabled = true;
-  setScanStatus('Preparing reader… (first time takes longer)');
-  try {
-    const canvas = await photoToCanvas(file);
-    applyScan(await readPatientPhoto(canvas, (p) => setScanStatus(`Reading… ${Math.round(p * 100)}%`)));
-  } catch (err) {
-    for (const k of Object.keys(ocrWorkers)) delete ocrWorkers[k];
-    setScanStatus('Could not read the photo. If this is the first scan, it needs an internet connection once to load the reader.', true);
-  } finally {
-    btn.disabled = false;
-  }
+  if (!file || scanBusy) return;
+  scanBusy = true;
+  clearTimeout(scanTimer);
+  scanVideo.pause();
+  let source;
+  try { source = await photoToCanvas(file); }
+  catch (err) { resumeScanner('That file could not be opened as a picture.'); return; }
+  readCaptured(source);
 });
 
-function applyScan(found) {
+// From inside a patient's form: fill that form.
+$('#scanBtn').addEventListener('click', () => openScanner((found) => applyScan(found)));
+
+// From the main screen: find whose document it is. An exact HN match opens
+// that patient; otherwise a new patient is started from what was read.
+$('#scanFab').addEventListener('click', () => openScanner((found) => {
+  const match = found.hn && patients.find((p) => p.hn === found.hn);
+  openEditor(match || null, { quiet: true });
+  applyScan(found, match
+    ? `HN ${found.hn} is already in your list — opened ${match.name || 'that patient'}${match.archived ? ' (archived)' : ''}.`
+    : found.hn ? `No patient with HN ${found.hn} yet — started a new one.` : 'No HN was read — started a new patient.');
+}));
+
+function applyScan(found, lead) {
   const f = form.elements;
   const existing = patients.find((p) => p.id === editingId);
   // Scanning into a saved patient: refuse a document that belongs to someone else.
@@ -842,15 +976,16 @@ function applyScan(found) {
     if (found.diagnosis) { get(row, 'diagnosis').value = found.diagnosis; get(row, 'diagnosis').rows = rowsFor(found.diagnosis); mark(get(row, 'diagnosis'), 'diagnosis', 'operative diagnosis'); }
   }
   if (!filled.length) {
-    setScanStatus(existing && (found.hn || found.name)
+    setScanStatus((lead ? `${lead} ` : '') + (existing && (found.hn || found.name)
       ? 'Nothing new on this document for this patient.'
-      : 'No patient details found. Move closer to the printed block, keep the text level and avoid shadows, then try again.', true);
+      : 'No patient details found. Move closer to the printed block, keep the text level and avoid shadows, then try again.'), true);
     return;
   }
   dirty = true;
   f.name.classList.remove('invalid');
   const dup = found.hn && patients.find((p) => p.hn === found.hn && p.id !== editingId);
   const parts = [`Filled: ${filled.join(', ')}.`];
+  if (lead) parts.unshift(lead);
   if (dup) parts.unshift(`HN ${found.hn} is already in your list (${dup.name}${dup.archived ? ', archived' : ''}) — open that patient and scan there to add to it.`);
   if (unsure.length) parts.push(`Not read clearly, shown in amber: ${unsure.join(', ')}. A closer, sharper photo helps.`);
   parts.push('Check everything against the paper — handwriting is not read.');

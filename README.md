@@ -27,8 +27,19 @@ The text can be edited before copying.
 
 ## Scanning a sticker or document
 
-In the patient form, **Scan sticker or document** takes a photo (or picks
-one) and fills in what it can read from the printed patient block:
+There are two scan buttons:
+
+- **On the main screen** (above the + button): scan anything, and the app
+  works out whose it is. If the HN matches a patient in the list, that patient
+  opens with the new details filled in; otherwise a new patient is started.
+- **Inside a patient's form**: fills that patient's form.
+
+Both open a live camera view. When it sees a patient barcode held steady (on a
+sticker, or on a page that carries one) it takes the picture by itself. For
+anything else, tap the round button, or use **Choose photo**. If the camera is
+not available, **Choose photo** still works.
+
+What it reads from the printed patient block:
 
 - **Order-sheet / first-page header** — HN, name, age, admission date
   (Buddhist-era dates are converted).
