@@ -445,8 +445,14 @@ function parsePatientText(raw) {
   const names = [...text.matchAll(titleRe)].filter((m) => !/^นาย\s*แพทย์/.test(m[1]));
   const pick = names.find((m) => m.index > hnAt) || names[0];
   if (pick) {
-    const name = pick[1].split(/\s{2,}|[|:;'"]/)[0].replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
-    if (name.split(' ').length > 1) out.name = name;
+    let words = pick[1].split(/\s{2,}|[|:;'"]/)[0].replace(/[,_]/g, ' ').trim().split(/\s+/);
+    // Stray marks after a Thai name show up as Latin letters, digits or tiny fragments.
+    if (/^[ก-๙]/.test(words[0])) {
+      const stop = words.findIndex((w, i) => i > 0 && !/^[ก-๙.]{2,}$/.test(w));
+      if (stop > 0) words = words.slice(0, stop);
+    }
+    const name = words.slice(0, 4).join(' ');
+    if (name.length >= 6) out.name = name;
   }
 
   const age = text.match(/(?:อายุ|Age)\s*[:.]?\s*(\d{1,3})\s*(?:ปี|[Yy])?(?:\s*(\d{1,2})\s*เดือน)?/);
@@ -573,7 +579,7 @@ function pickWard(codes) {
 //  - Thai only: steadiest for short Thai words such as month names
 const OCR_PASSES = [[['tha', 'eng'], '3'], [['tha', 'eng'], '6'], [['tha'], '3']];
 
-async function readPatientPhoto(source, onProgress) {
+async function ocrReadings(source, onProgress) {
   const canvas = enhanceForOcr(source);
   const readings = [];
   for (let i = 0; i < OCR_PASSES.length; i++) {
@@ -583,6 +589,39 @@ async function readPatientPhoto(source, onProgress) {
     await worker.setParameters({ tessedit_pageseg_mode: layout });
     readings.push(parsePatientText((await worker.recognize(canvas)).data.text));
   }
+  return readings;
+}
+
+// On a sticker the text sits just under the barcode. When the barcode is
+// found, cut that area out of the full-resolution photo so the sticker is
+// read large and without the clutter around it (other labels, handwriting).
+function cropSticker(source, box) {
+  const full = source.fullImage || source;
+  const k = full.width / source.width;
+  const w = box.right - box.left;
+  const left = Math.max(0, (box.left - 0.35 * w) * k);
+  const top = Math.max(0, (box.y - 0.2 * w) * k);
+  const right = Math.min(full.width, (box.right + 0.9 * w) * k);
+  const bottom = Math.min(full.height, (box.y + 0.68 * w) * k);
+  // Sized so the letters come out at the height the reader handles best.
+  const scale = Math.min(4, 700 / (right - left));
+  const canvas = h('canvas', { width: Math.round((right - left) * scale), height: Math.round((bottom - top) * scale) });
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(full, left, top, right - left, bottom - top, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+async function readPatientPhoto(source, onProgress) {
+  const code = await readBarcode(source);
+  const barcode = code ? code.text : '';
+  let readings = null;
+  if (code) {
+    readings = await ocrReadings(cropSticker(source, code), (p) => onProgress(p / 2));
+    // Not a sticker after all (e.g. a form that happens to carry a barcode).
+    if (!readings.some((r) => r.name || r.age || r.hn === barcode)) readings = null;
+  }
+  if (!readings) readings = await ocrReadings(source, (p) => onProgress(code ? 0.5 + p / 2 : p));
   const all = (k) => readings.map((r) => r[k]).filter(Boolean);
   const found = {};
   const unsure = [];
@@ -594,7 +633,6 @@ async function readPatientPhoto(source, onProgress) {
   };
 
   let hns = all('hn');
-  const barcode = await readBarcodeDigits(source);
   if (barcode && (!hns.length || hns.some((x) => barcode.includes(x) || editDistance(barcode, x) <= 2))) {
     found.hn = barcode;
   } else if (hns.length) {
@@ -618,7 +656,7 @@ async function readPatientPhoto(source, onProgress) {
 // A barcode, when one is in the photo and sharp enough, gives the number
 // exactly. It is only trusted when it agrees with (or stands in for) the
 // printed number, since some barcodes carry a different number.
-async function readBarcodeDigits(canvas) {
+async function readBarcode(canvas) {
   try {
     if (!window.ZXingWASM) {
       await loadScript('vendor/zxing/zxing-reader.js');
@@ -627,10 +665,14 @@ async function readBarcodeDigits(canvas) {
     }
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const results = await window.ZXingWASM.readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), { tryHarder: true, maxNumberOfSymbols: 4 });
-    const hit = results.map((r) => r.text.trim()).find((t) => /^\d{6,9}$/.test(t));
-    return hit || '';
+    const hit = results.find((r) => /^\d{6,9}$/.test(r.text.trim()));
+    if (!hit) return null;
+    const pts = Object.values(hit.position);
+    const xs = pts.map((pt) => pt.x);
+    const ys = pts.map((pt) => pt.y);
+    return { text: hit.text.trim(), left: Math.min(...xs), right: Math.max(...xs), y: (Math.min(...ys) + Math.max(...ys)) / 2 };
   } catch (e) {
-    return '';
+    return null;
   }
 }
 
@@ -647,6 +689,7 @@ async function photoToCanvas(file) {
   const scale = Math.min(1, 2400 / Math.max(img.width, img.height));
   const canvas = h('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
   canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  canvas.fullImage = img; // kept so a small sticker can be cut out at full resolution
   return canvas;
 }
 
