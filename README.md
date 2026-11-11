@@ -16,6 +16,19 @@ A small mobile-friendly app for keeping track of ward patients and their paperwo
 Tap a document on a patient card to tick it off. When everything is done the
 patient can be archived, which moves them out of the active list.
 
+## Scanning a sticker or sheet header
+
+In the patient form, **Scan sticker or sheet header** takes a photo (or picks
+one) and fills in what it can read from the printed patient block: HN, name,
+age and admission date. Thai dates in the Buddhist era are converted.
+
+- The reading happens on the phone itself (Tesseract OCR bundled in
+  `vendor/tesseract/`). The photo is not uploaded and not kept.
+- Handwriting — ward, diagnosis, operation — is not read; type those in.
+- Always check the filled fields against the paper. Thai names in particular
+  can come out with a wrong letter. Fill the frame with the printed block,
+  keep it level and avoid shadows for the best result.
+
 ## Using it on a phone
 
 The app is plain HTML/CSS/JS with no build step and no server.

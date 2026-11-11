@@ -267,6 +267,13 @@ legend {
 .radio-seg input[value="done"]:checked + span { background: var(--ok); color: var(--ok-soft); }
 .radio-seg input:focus-visible + span { outline: 2px solid var(--accent); }
 
+.scan { margin-bottom: 18px; }
+.scan-btn { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px; }
+.scan-btn:disabled { opacity: .6; }
+.scan .hint { margin: 0; }
+.scan .hint.warn { color: var(--warn); }
+.field input.scanned, .field textarea.scanned { border-color: var(--accent); background: var(--accent-soft); }
+
 .hint { color: var(--muted); font-size: .88rem; margin: 0 0 14px; }
 .hint:empty { display: none; }
 

@@ -313,6 +313,8 @@ function openEditor(p) {
   $('#editorActions').hidden = !p;
   $('#archiveBtn').textContent = p && p.archived ? 'Restore to active' : 'Archive patient';
   form.elements.name.classList.remove('invalid');
+  clearScanMarks();
+  setScanStatus('');
   dirty = false;
   editor.showModal();
   $('.sheet-body', editor).scrollTop = 0;
@@ -324,7 +326,7 @@ function closeEditor(force) {
   editor.close();
 }
 
-form.addEventListener('input', () => { dirty = true; });
+form.addEventListener('input', (e) => { dirty = true; e.target.classList.remove('scanned'); });
 form.addEventListener('submit', (e) => {
   e.preventDefault();
   const f = form.elements;
@@ -379,6 +381,194 @@ $('#deleteBtn').addEventListener('click', () => {
   render();
   toast('Patient deleted', { label: 'Undo', run: () => { patients.splice(idx, 0, p); save(); render(); } });
 });
+
+/* ---------- scan a sticker / sheet header ---------- */
+
+// Text recognition runs entirely on this device (Tesseract compiled to
+// WebAssembly, served from vendor/). The photo is never uploaded or stored.
+
+const TH_MONTHS = ['มค', 'กพ', 'มีค', 'เมย', 'พค', 'มิย', 'กค', 'สค', 'กย', 'ตค', 'พย', 'ธค'];
+const TH_MONTHS_FULL = ['มกรา', 'กุมภา', 'มีนา', 'เมษา', 'พฤษภา', 'มิถุนา', 'กรกฎา', 'สิงหา', 'กันยา', 'ตุลา', 'พฤศจิกา', 'ธันวา'];
+const EN_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+// Thai paperwork uses the Buddhist era (CE + 543), often with 2-digit years.
+function toCeYear(y) {
+  if (y >= 2400) return y - 543;
+  if (y >= 1900) return y;
+  if (y < 100) return y >= 40 ? 2500 + y - 543 : 2000 + y;
+  return null;
+}
+
+function toIsoDate(d, m, y) {
+  y = toCeYear(y);
+  if (!y || m < 1 || m > 12 || d < 1 || d > 31) return '';
+  const dt = new Date(y, m - 1, d);
+  if (dt.getMonth() !== m - 1) return '';
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// First date found in a short piece of text: "5 พ.ย. 2569", "05/11/2569", "5 Nov 2026".
+function findDate(text) {
+  let m = text.match(/(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{4}|\d{2})(?!\d)/);
+  if (m) return toIsoDate(+m[1], +m[2], +m[3]);
+  m = text.match(/(\d{1,2})\s*([^\d\n]{2,14}?)\s*(\d{4}|\d{2})(?!\d)/);
+  if (!m) return '';
+  const word = m[2].replace(/[\s.,]/g, '').toLowerCase();
+  let month = TH_MONTHS_FULL.findIndex((x) => word.startsWith(x));
+  if (month < 0) month = TH_MONTHS.indexOf(word);
+  if (month < 0) month = EN_MONTHS.findIndex((x) => word.startsWith(x));
+  return month < 0 ? '' : toIsoDate(+m[1], month + 1, +m[3]);
+}
+
+function parsePatientText(raw) {
+  const text = raw.replace(/[๐-๙]/g, (c) => String(c.charCodeAt(0) - 0x0e50));
+  const out = {};
+
+  const hn = text.match(/H\s*\.?\s*N\s*[.:]?\s*(\d[\d\-\/]{2,12}\d)/i);
+  if (hn) out.hn = hn[1].replace(/\s/g, '');
+
+  // Name: a line starting with a title. Prefer the one after the HN, so a
+  // doctor's name printed earlier on the page is not picked up.
+  const titleRe = /(?:^|[\s:|'"])((?:นางสาว|นาย|นาง|น\.\s?ส\.|ด\.\s?ช\.|ด\.\s?ญ\.|เด็กชาย|เด็กหญิง|Mrs?\.?|Ms\.?|Miss)(?![ก-๙A-Za-z])\s*[^\n]*)/g;
+  const names = [...text.matchAll(titleRe)].filter((m) => !/^นาย\s*แพทย์/.test(m[1]));
+  const pick = names.find((m) => !hn || m.index > hn.index) || names[0];
+  if (pick) {
+    const name = pick[1].split(/\s{2,}|[|:;'"]/)[0].replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ');
+    if (name.split(' ').length > 1) out.name = name;
+  }
+
+  const age = text.match(/(?:อายุ|Age)\s*[:.]?\s*(\d{1,3})\s*(?:ปี|[Yy])?(?:\s*(\d{1,2})\s*เดือน)?/);
+  if (age && +age[1] <= 120) out.age = +age[1] === 0 && age[2] ? `${+age[2]} mo` : String(+age[1]);
+
+  const adm = text.match(/(?:วันที่\s*เข้า\s*รับ\s*บริการ|วันที่\s*รับ\s*(?:ไว้|เข้า)?|วัน\s*Admit|Admi(?:t|ssion)(?:ted)?\s*(?:date)?|รับไว้)\s*[:.]?\s*([^\n]{4,24})/i);
+  if (adm) { const d = findDate(adm[1]); if (d) out.admitDate = d; }
+
+  // The birth date is a second source for age and is read more reliably
+  // than a lone two-digit number, so it wins when present.
+  const dob = text.match(/(?:วัน\s*เกิด|Birth\s*date|DOB)\s*[:.]?\s*([^\n]{4,24})/i);
+  const born = dob && parseDate(findDate(dob[1]));
+  if (born) {
+    const ref = parseDate(out.admitDate) || new Date();
+    let years = ref.getFullYear() - born.getFullYear();
+    if (ref.getMonth() < born.getMonth() || (ref.getMonth() === born.getMonth() && ref.getDate() < born.getDate())) years--;
+    if (years >= 1 && years <= 120) out.age = String(years);
+  }
+
+  return out;
+}
+
+// Two readers: Thai+English reads the whole block (it needs English for
+// "HN"); Thai-only is steadier on short Thai words such as month names, so it
+// is used as a second pass when the first one leaves gaps.
+const ocrWorkers = {};
+let ocrProgress = () => {};
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = h('script', { src });
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('load failed'));
+    document.head.append(s);
+  });
+}
+
+async function getOcrWorker(langs) {
+  const key = langs.join('+');
+  if (ocrWorkers[key]) return ocrWorkers[key];
+  if (!window.Tesseract) await loadScript('vendor/tesseract/tesseract.min.js');
+  const base = new URL('vendor/tesseract/', location.href).href;
+  ocrWorkers[key] = await window.Tesseract.createWorker(langs, 1, {
+    workerPath: base + 'worker.min.js',
+    corePath: base,
+    langPath: base + 'lang',
+    gzip: true,
+    workerBlobURL: false,
+    logger: (m) => { if (m.status === 'recognizing text') ocrProgress(m.progress); },
+  });
+  return ocrWorkers[key];
+}
+
+async function readPatientPhoto(canvas, onProgress) {
+  const wanted = ['hn', 'name', 'age', 'admitDate'];
+  ocrProgress = (p) => onProgress(p * 0.6);
+  let worker = await getOcrWorker(['tha', 'eng']);
+  const found = parsePatientText((await worker.recognize(canvas)).data.text);
+  if (wanted.some((k) => !found[k])) {
+    ocrProgress = (p) => onProgress(0.6 + p * 0.4);
+    worker = await getOcrWorker(['tha']);
+    const second = parsePatientText((await worker.recognize(canvas)).data.text);
+    for (const [k, v] of Object.entries(second)) if (!found[k]) found[k] = v;
+  }
+  return found;
+}
+
+// Phone photos are far larger than needed; shrink before recognising.
+async function photoToCanvas(file) {
+  let img;
+  try { img = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch (e) {
+    img = new Image();
+    img.src = URL.createObjectURL(file);
+    await img.decode();
+    URL.revokeObjectURL(img.src);
+  }
+  const scale = Math.min(1, 2400 / Math.max(img.width, img.height));
+  const canvas = h('canvas', { width: Math.round(img.width * scale), height: Math.round(img.height * scale) });
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+function setScanStatus(msg, warn) {
+  const el = $('#scanStatus');
+  el.textContent = msg;
+  el.classList.toggle('warn', !!warn);
+}
+
+function clearScanMarks() {
+  for (const el of form.querySelectorAll('.scanned')) el.classList.remove('scanned');
+}
+
+$('#scanBtn').addEventListener('click', () => $('#scanFile').click());
+$('#scanFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const btn = $('#scanBtn');
+  btn.disabled = true;
+  setScanStatus('Preparing reader… (first time takes longer)');
+  try {
+    const canvas = await photoToCanvas(file);
+    applyScan(await readPatientPhoto(canvas, (p) => setScanStatus(`Reading… ${Math.round(p * 100)}%`)));
+  } catch (err) {
+    for (const k of Object.keys(ocrWorkers)) delete ocrWorkers[k];
+    setScanStatus('Could not read the photo. If this is the first scan, it needs an internet connection once to load the reader.', true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function applyScan(found) {
+  const f = form.elements;
+  const labels = { hn: 'HN', name: 'name', age: 'age', admitDate: 'admission date' };
+  const filled = [];
+  clearScanMarks();
+  for (const k of Object.keys(labels)) {
+    if (!found[k]) continue;
+    f[k].value = found[k];
+    f[k].classList.add('scanned');
+    filled.push(labels[k]);
+  }
+  if (!filled.length) {
+    setScanStatus('No patient details found. Move closer to the printed block, keep the text level and avoid shadows, then try again.', true);
+    return;
+  }
+  dirty = true;
+  f.name.classList.remove('invalid');
+  const dup = found.hn && patients.find((p) => p.hn === found.hn && p.id !== editingId);
+  setScanStatus(dup
+    ? `HN ${found.hn} is already in your list (${dup.name}${dup.archived ? ', archived' : ''}). Filled: ${filled.join(', ')}.`
+    : `Filled: ${filled.join(', ')}. Please check them against the paper — handwriting (ward, diagnosis, operation) is not read.`, !!dup);
+}
 
 /* ---------- toolbar ---------- */
 
