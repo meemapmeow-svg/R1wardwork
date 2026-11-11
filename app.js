@@ -257,6 +257,7 @@ function card(p) {
     h('div', { class: 'docs' }, docChips),
     h('div', { class: 'card-foot' },
       h('button', { class: 'text-btn', onclick: () => openEditor(p) }, 'Edit'),
+      p.operations.length > 0 && h('button', { class: 'text-btn', onclick: () => openReport(p) }, 'Post-op report'),
       p.archived
         ? h('button', { class: 'text-btn', onclick: () => setArchived(p.id, false) }, 'Restore to active')
         : complete && h('button', { class: 'text-btn strong', onclick: () => setArchived(p.id, true) }, 'Archive')));
@@ -862,6 +863,70 @@ for (const tab of document.querySelectorAll('[data-view]')) {
     render();
   });
 }
+
+/* ---------- post-op report ---------- */
+
+// The operation being reported: the most recent dated one, else the last entered.
+function latestOperation(p) {
+  const dated = p.operations.filter((o) => o.date).sort((a, b) => b.date.localeCompare(a.date));
+  return dated[0] || p.operations[p.operations.length - 1] || null;
+}
+
+// Text that spans several lines starts on its own line under the label.
+function labelled(label, text) {
+  return text.includes('\n') ? `${label}:\n${text}` : `${label}: ${text}`;
+}
+
+function postOpReport(p) {
+  const op = latestOperation(p);
+  const age = /^\d+$/.test(p.age) ? `${p.age} ปี` : p.age;
+  return [
+    'ขออนุญาตรายงานเคส post-op ครับ',
+    '',
+    p.name,
+    `อายุ ${age}`,
+    `HN ${p.hn}`,
+    '',
+    labelled('Dx', p.diagnosis),
+    labelled('Op', op ? op.name : ''),
+  ].join('\n');
+}
+
+const report = $('#report');
+
+function openReport(p) {
+  const missing = [!p.age && 'age', !p.hn && 'HN', !p.diagnosis && 'diagnosis', !(latestOperation(p) || {}).name && 'operation'].filter(Boolean);
+  $('#reportText').value = postOpReport(p);
+  $('#reportNote').textContent = missing.length ? `Not filled in for this patient: ${missing.join(', ')}.` : '';
+  $('#reportShare').hidden = !navigator.share;
+  report.showModal();
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    // Older browsers, or clipboard permission refused: copy from the visible box.
+    const box = $('#reportText');
+    box.focus();
+    box.select();
+    try { return document.execCommand('copy'); } catch (err) { return false; }
+  }
+}
+
+$('#reportClose').addEventListener('click', () => report.close());
+$('#reportCopy').addEventListener('click', async () => {
+  const ok = await copyText($('#reportText').value);
+  if (ok) report.close();
+  toast(ok ? 'Report copied — paste it into your chat' : 'Could not copy. Select the text and copy it by hand.');
+});
+$('#reportShare').addEventListener('click', async () => {
+  try {
+    await navigator.share({ text: $('#reportText').value });
+    report.close();
+  } catch (e) { /* share sheet dismissed */ }
+});
 
 /* ---------- backup ---------- */
 

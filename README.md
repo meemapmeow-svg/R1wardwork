@@ -16,6 +16,13 @@ A small mobile-friendly app for keeping track of ward patients and their paperwo
 Tap a document on a patient card to tick it off. When everything is done the
 patient can be archived, which moves them out of the active list.
 
+## Post-op report
+
+A patient with an operation gets a **Post-op report** button on their card.
+It builds the report header (name, age in years, HN, diagnosis, and the most
+recent operation) ready to **Copy** or **Share** into a chat app such as LINE.
+The text can be edited before copying.
+
 ## Scanning a sticker or document
 
 In the patient form, **Scan sticker or document** takes a photo (or picks
