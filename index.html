@@ -23,6 +23,11 @@
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
       </button>
     </div>
+    <div class="main-tabs" role="tablist" aria-label="Section">
+      <button role="tab" data-main="ward" aria-selected="true">Ward</button>
+      <button role="tab" data-main="er" aria-selected="false">ER consults <span id="erBadge" class="badge" hidden></span></button>
+    </div>
+    <div id="wardHead">
     <p id="summary" class="summary" aria-live="polite"></p>
     <input id="search" class="search" type="search" placeholder="Search name, HN, bed, diagnosis…" autocomplete="off" aria-label="Search patients">
     <div class="controls">
@@ -41,9 +46,21 @@
       </label>
     </div>
     <div id="wardChips" class="chips-row" aria-label="Filter by ward"></div>
+    </div>
+    <div id="erHead" hidden>
+      <p id="erSummary" class="summary" aria-live="polite"></p>
+      <input id="erSearch" class="search" type="search" placeholder="Search name, HN, diagnosis, location…" autocomplete="off" aria-label="Search ER consults">
+      <div class="controls">
+        <div class="segmented" role="tablist" aria-label="Consult list">
+          <button role="tab" data-er-view="open" aria-selected="true">Open</button>
+          <button role="tab" data-er-view="closed" aria-selected="false">Closed / admitted</button>
+        </div>
+      </div>
+    </div>
   </header>
 
   <main id="list" class="list"></main>
+  <section id="erList" class="list" hidden aria-label="ER consults"></section>
 
   <button id="scanFab" class="fab fab-scan" aria-label="Scan a sticker or document">
     <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M7 12h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -127,6 +144,96 @@
     </form>
   </dialog>
 
+  <!-- ER consult editor -->
+  <dialog id="consultEditor" class="sheet">
+    <form id="consultForm" novalidate>
+      <div class="sheet-head">
+        <button type="button" class="text-btn" id="consultCancel">Cancel</button>
+        <h2 id="consultTitle">New ER consult</h2>
+        <button type="submit" class="text-btn strong">Save</button>
+      </div>
+      <div class="sheet-body">
+        <div class="scan">
+          <button type="button" class="block-btn scan-btn" id="consultScanBtn"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2M7 12h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Scan sticker for name, HN, age
+          </button>
+          <p class="hint" id="consultScanStatus" role="status" aria-live="polite"></p>
+        </div>
+        <fieldset>
+          <legend>Patient</legend>
+          <label class="field">Name
+            <input name="name" autocomplete="off" enterkeyhint="next">
+          </label>
+          <div class="grid2">
+            <label class="field">HN
+              <input name="hn" inputmode="numeric" autocomplete="off">
+            </label>
+            <label class="field">Age
+              <input name="age" inputmode="numeric" autocomplete="off" placeholder="years">
+            </label>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>สิทธิ์การรักษา</legend>
+          <div class="pick" id="pickScheme"></div>
+          <label class="field"><span class="visually-hidden">สิทธิ์อื่นๆ</span>
+            <input name="schemeOther" autocomplete="off" placeholder="ระบุสิทธิ์" hidden>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Underlying disease</legend>
+          <div class="pick" id="pickUd"></div>
+          <label class="field"><span class="visually-hidden">Other underlying disease</span>
+            <input name="udOther" autocomplete="off" placeholder="Other U/D">
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Chief complaint</legend>
+          <label class="field"><span class="visually-hidden">Chief complaint</span>
+            <input name="cc" autocomplete="off">
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Present illness</legend>
+          <label class="field"><span class="visually-hidden">Present illness</span>
+            <textarea name="pi" rows="3"></textarea>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Film</legend>
+          <div class="pick" id="pickFilm"></div>
+          <p class="hint">Limbs: tap again to change side — Rt, Lt, Both, off.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Lab</legend>
+          <div class="pick" id="pickLab"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Diagnosis / consulted problem</legend>
+          <label class="field"><span class="visually-hidden">Diagnosis or consulted problem</span>
+            <textarea name="dx" rows="2"></textarea>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Location</legend>
+          <div class="pick" id="pickLocation"></div>
+          <label class="field"><span class="visually-hidden">Other ward</span>
+            <input name="locationOther" autocomplete="off" placeholder="Which ward" hidden>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Contact number</legend>
+          <label class="field"><span class="visually-hidden">Contact number</span>
+            <input name="contact" type="tel" inputmode="tel" autocomplete="off">
+          </label>
+        </fieldset>
+        <div class="danger-zone" id="consultActions" hidden>
+          <button type="button" class="ghost-btn danger" id="consultDelete">Delete consult</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Live scanner -->
   <dialog id="scanner" class="scanner">
     <video id="scanVideo" playsinline muted autoplay></video>
@@ -150,7 +257,7 @@
   <dialog id="report" class="sheet small">
     <div class="sheet-head">
       <span></span>
-      <h2>Post-op report</h2>
+      <h2 id="reportTitle">Post-op report</h2>
       <button type="button" class="text-btn strong" id="reportClose">Close</button>
     </div>
     <div class="sheet-body">
@@ -183,5 +290,6 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>
+  <script src="er.js"></script>
 </body>
 </html>

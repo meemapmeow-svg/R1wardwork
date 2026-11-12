@@ -148,7 +148,7 @@ function toast(msg, action) {
 /* ---------- state ---------- */
 
 let patients = load();
-const state = { view: 'active', ward: '', query: '', sort: loadPrefs().sort };
+const state = { main: 'ward', view: 'active', ward: '', query: '', sort: loadPrefs().sort };
 
 /* ---------- list rendering ---------- */
 
@@ -317,9 +317,13 @@ function docRow(d, value) {
         h('span', null, text)))));
 }
 
+// Set when the form was opened to admit an ER consult; run once the patient is saved.
+let afterPatientSave = null;
+
 function openEditor(p, opts = {}) {
   editingId = p ? p.id : null;
-  const data = p || normalize({ ward: state.ward, admitDate: todayStr() });
+  const data = p || normalize({ ward: state.ward, admitDate: todayStr(), ...(opts.preset || {}) });
+  afterPatientSave = opts.afterSave || null;
   $('#editorTitle').textContent = p ? 'Edit patient' : 'New patient';
   for (const k of ['name', 'age', 'hn', 'ward', 'bed', 'admitDate', 'diagnosis', 'notes']) form.elements[k].value = data[k];
   $('#ops').replaceChildren(...(data.operations.length ? data.operations : []).map(opRow));
@@ -367,13 +371,16 @@ form.addEventListener('submit', (e) => {
   if (existing) patients[patients.indexOf(existing)] = next;
   else patients.push(next);
   save();
+  const admitted = afterPatientSave;
   closeEditor(true);
+  if (admitted) admitted(next);
   render();
-  toast(existing ? 'Saved' : 'Patient added');
+  toast(admitted ? 'Admitted to the ward list' : existing ? 'Saved' : 'Patient added');
 });
 
 $('#cancelBtn').addEventListener('click', () => closeEditor());
 editor.addEventListener('cancel', (e) => { e.preventDefault(); closeEditor(); });
+editor.addEventListener('close', () => { afterPatientSave = null; });
 $('#addOpBtn').addEventListener('click', () => {
   const row = opRow();
   $('#ops').append(row);
@@ -988,6 +995,8 @@ for (const b of document.querySelectorAll('[data-scan-mode]')) b.addEventListene
 // From the main screen: find whose document it is. An exact HN match opens
 // that patient; otherwise a new patient is started from what was read.
 $('#scanFab').addEventListener('click', () => openScanner((found) => {
+  // On the ER tab a scan starts a new consult from the sticker.
+  if (state.main === 'er') { openConsult(null); fillConsultFromScan(found); return; }
   const match = found.hn && patients.find((p) => p.hn === found.hn);
   openEditor(match || null, { quiet: true });
   applyScan(found, match
@@ -1055,7 +1064,7 @@ function applyScan(found, lead) {
 
 /* ---------- toolbar ---------- */
 
-$('#addBtn').addEventListener('click', () => openEditor(null));
+$('#addBtn').addEventListener('click', () => (state.main === 'er' ? openConsult(null) : openEditor(null)));
 $('#search').addEventListener('input', (e) => { state.query = e.target.value.trim(); render(); });
 $('#sort').value = state.sort;
 $('#sort').addEventListener('change', (e) => { state.sort = e.target.value; savePrefs(); render(); });
@@ -1098,12 +1107,18 @@ function postOpReport(p) {
 
 const report = $('#report');
 
-function openReport(p) {
-  const missing = [!p.age && 'age', !p.hn && 'HN', !((latestOperation(p) || {}).diagnosis || p.diagnosis) && 'diagnosis', !(latestOperation(p) || {}).name && 'operation'].filter(Boolean);
-  $('#reportText').value = postOpReport(p);
-  $('#reportNote').textContent = missing.length ? `Not filled in for this patient: ${missing.join(', ')}.` : '';
+// A sheet holding a ready-made message: editable, then copied or shared.
+function openTextSheet(title, text, note) {
+  $('#reportTitle').textContent = title;
+  $('#reportText').value = text;
+  $('#reportNote').textContent = note || '';
   $('#reportShare').hidden = !navigator.share;
   report.showModal();
+}
+
+function openReport(p) {
+  const missing = [!p.age && 'age', !p.hn && 'HN', !((latestOperation(p) || {}).diagnosis || p.diagnosis) && 'diagnosis', !(latestOperation(p) || {}).name && 'operation'].filter(Boolean);
+  openTextSheet('Post-op report', postOpReport(p), missing.length ? `Not filled in for this patient: ${missing.join(', ')}.` : '');
 }
 
 async function copyText(text) {
@@ -1139,7 +1154,7 @@ $('#menuBtn').addEventListener('click', () => { updateStorageNote(); menu.showMo
 $('#menuClose').addEventListener('click', () => menu.close());
 
 $('#exportBtn').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify({ app: 'wardwork', version: 1, exportedAt: new Date().toISOString(), patients }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ app: 'wardwork', version: 1, exportedAt: new Date().toISOString(), patients, consults }, null, 2)], { type: 'application/json' });
   const a = h('a', { href: URL.createObjectURL(blob), download: `wardwork-backup-${todayStr()}.json` });
   document.body.append(a);
   a.click();
@@ -1167,8 +1182,9 @@ $('#importFile').addEventListener('change', async (e) => {
     }
     save();
     render();
+    const consultsAdded = mergeConsults(data.consults);
     menu.close();
-    toast(`Import: ${added} added, ${updated} updated`);
+    toast(`Import: ${added} added, ${updated} updated${consultsAdded ? `, ${consultsAdded} ER consult${consultsAdded === 1 ? '' : 's'}` : ''}`);
   } catch (err) {
     toast('That file is not a Ward Work backup.');
   }

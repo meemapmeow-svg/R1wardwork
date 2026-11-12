@@ -69,6 +69,26 @@ button { cursor: pointer; }
 .topbar > * { max-width: 720px; margin-left: auto; margin-right: auto; }
 .topbar-row { display: flex; align-items: center; justify-content: space-between; }
 h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
+.main-tabs { display: flex; gap: 4px; margin-top: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+.main-tabs button {
+  flex: 1; border: 0; background: none; padding: 10px 6px; min-height: 44px; font-weight: 650; color: var(--muted);
+  border-bottom: 3px solid transparent; margin-bottom: -1px;
+}
+.main-tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.badge {
+  display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 4px; border-radius: 999px;
+  background: var(--danger); color: #fff; font-size: .75rem; font-variant-numeric: tabular-nums;
+}
+.badge[hidden], .list[hidden], #wardHead[hidden], #erHead[hidden] { display: none; }
+
+/* tap-to-select groups in the ER consult form */
+.pick { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.pick-chip { min-height: 44px; padding: 8px 16px; font-size: .95rem; }
+.field input[hidden] { display: none; }
+.consult.new { border-left: 4px solid var(--warn); }
+.consult .card-foot { align-items: center; margin: 10px -4px -6px; gap: 2px 4px; }
+.consult .card-foot .doc { margin-left: 4px; }
+.tel { color: var(--accent); font-weight: 600; text-decoration: none; white-space: nowrap; }
 .summary { margin: 0 auto 10px; color: var(--muted); font-size: .875rem; font-variant-numeric: tabular-nums; }
 
 .search, .field input, .field textarea, .sort select {
@@ -241,7 +261,7 @@ h1 { font-size: 1.35rem; margin: 0; letter-spacing: -.01em; }
   width: 100%; max-width: 600px; height: 100dvh; max-height: 100dvh;
 }
 .sheet::backdrop { background: rgba(0, 0, 0, .5); }
-.sheet form, .sheet.small { display: flex; flex-direction: column; }
+.sheet form, .sheet.small[open] { display: flex; flex-direction: column; }
 .sheet form { height: 100%; }
 .sheet.small[open] { display: flex; }
 @media (min-width: 640px) {

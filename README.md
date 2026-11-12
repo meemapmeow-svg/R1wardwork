@@ -17,6 +17,28 @@ A small mobile-friendly app for keeping track of ward patients and their paperwo
 Tap a document on a patient card to tick it off. When everything is done the
 patient can be archived, which moves them out of the active list.
 
+## ER consults
+
+The **ER consults** tab is a separate list for notifications from the
+emergency room. Tap **+** when the ER calls; almost everything is tap-to-select:
+
+- Name (typed, or scanned from a sticker together with HN and age), HN, age
+- สิทธิ์การรักษา, underlying disease, film (limbs take a side: tap again for
+  Rt, Lt, Both), lab, location in the ER or another ward — all buttons
+- Chief complaint, present illness, diagnosis / consulted problem, contact
+  number — typed
+
+Each consult card shows when it was received and has:
+
+- **Seen** — tick once you have seen the patient; the tab shows how many are
+  still waiting
+- **Copy message** — the consult as a text message, to copy or share
+- **Admit** — opens a new ward patient filled in from the consult (or the
+  existing patient with that HN); saving it marks the consult as admitted
+- **Close** — for consults that end without admission
+
+ER consults are included in backup files.
+
 ## Post-op report
 
 A patient with an operation gets a **Post-op report** button on their card.
