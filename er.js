@@ -11,6 +11,7 @@ const ER_UD = ['HT', 'DM', 'DLP', 'Old CVA', 'CKD', 'IHD', 'AF'];
 // `side` films take a side: tapping goes Rt → Lt → Both → off.
 const ER_FILMS = [
   { id: 'CXR' }, { id: 'Pelvis' },
+  { id: 'Hip AP', side: true }, { id: 'Hip lateral cross-table', side: true },
   { id: 'Shoulder', side: true }, { id: 'Upper arm', side: true }, { id: 'Forearm', side: true },
   { id: 'Wrist', side: true }, { id: 'Hand', side: true }, { id: 'Fingers', side: true },
   { id: 'Thigh', side: true }, { id: 'Knee', side: true }, { id: 'Leg', side: true },
