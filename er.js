@@ -6,12 +6,12 @@
 
 const ER_KEY = 'wardwork.er.v1';
 
-const ER_SCHEMES = ['ข้าราชการ', 'ประกันสังคม', 'UC', 'พรบ.', 'ชำระเงินเอง', 'ประกันเอกชน'];
+const ER_SCHEMES = ['ข้าราชการ', 'ประกันสังคม', 'UC รามา', 'UC ที่อื่น', 'ผู้พิการ', 'พรบ.', 'ชำระเงินเอง', 'ประกันเอกชน'];
 const ER_UD = ['HT', 'DM', 'DLP', 'Old CVA', 'CKD', 'IHD', 'AF'];
 // `side` films take a side: tapping goes Rt → Lt → Both → off.
 const ER_FILMS = [
   { id: 'CXR' }, { id: 'Pelvis' },
-  { id: 'Shoulder', side: true }, { id: 'Upper arm', side: true }, { id: 'Arm', side: true },
+  { id: 'Shoulder', side: true }, { id: 'Upper arm', side: true }, { id: 'Forearm', side: true },
   { id: 'Wrist', side: true }, { id: 'Hand', side: true }, { id: 'Fingers', side: true },
   { id: 'Thigh', side: true }, { id: 'Knee', side: true }, { id: 'Leg', side: true },
   { id: 'Ankle', side: true }, { id: 'Foot', side: true }, { id: 'Toes', side: true },
@@ -26,6 +26,9 @@ const OTHER = 'other';
 function normalizeConsult(c) {
   const str = (v) => (v == null ? '' : String(v)).trim();
   const list = (v, allowed) => (Array.isArray(v) ? v.map(str).filter((x) => allowed.includes(x)) : []);
+  // Consults saved before these options were renamed or split.
+  if (c.films && c.films.Arm && !c.films.Forearm) c = { ...c, films: { ...c.films, Forearm: c.films.Arm } };
+  if (c.scheme === 'UC') c = { ...c, scheme: OTHER, schemeOther: 'UC' };
   const films = {};
   for (const f of ER_FILMS) {
     const v = c && c.films ? str(c.films[f.id]) : '';
