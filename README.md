@@ -28,7 +28,17 @@ emergency room. Tap **+** when the ER calls; almost everything is tap-to-select:
 - Chief complaint, present illness, diagnosis / consulted problem, contact
   number — typed
 
+The patient's name can take an optional prefix (นาย, นาง, น.ส., …), also
+chosen by button; a scanned sticker sets it from the printed title.
+
+All the button lists — prefixes, สิทธิ์, underlying disease, films, labs,
+locations — can be changed in the app: **⋮ → Edit ER consult buttons**, or the
+link at the bottom of the consult form. It is one button per line. Removing a
+button never changes consults already saved.
+
 Each consult card shows when it was received and has:
+
+- **Edit** — reopen the consult to change anything
 
 - **Seen** — tick once you have seen the patient; the tab shows how many are
   still waiting
@@ -37,7 +47,7 @@ Each consult card shows when it was received and has:
   existing patient with that HN); saving it marks the consult as admitted
 - **Close** — for consults that end without admission
 
-ER consults are included in backup files.
+ER consults and your button lists are included in backup files.
 
 ## Post-op report
 

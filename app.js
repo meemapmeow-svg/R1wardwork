@@ -1154,7 +1154,7 @@ $('#menuBtn').addEventListener('click', () => { updateStorageNote(); menu.showMo
 $('#menuClose').addEventListener('click', () => menu.close());
 
 $('#exportBtn').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify({ app: 'wardwork', version: 1, exportedAt: new Date().toISOString(), patients, consults }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ app: 'wardwork', version: 1, exportedAt: new Date().toISOString(), patients, consults, erOptions }, null, 2)], { type: 'application/json' });
   const a = h('a', { href: URL.createObjectURL(blob), download: `wardwork-backup-${todayStr()}.json` });
   document.body.append(a);
   a.click();
@@ -1182,6 +1182,7 @@ $('#importFile').addEventListener('change', async (e) => {
     }
     save();
     render();
+    importErOptions(data.erOptions);
     const consultsAdded = mergeConsults(data.consults);
     menu.close();
     toast(`Import: ${added} added, ${updated} updated${consultsAdded ? `, ${consultsAdded} ER consult${consultsAdded === 1 ? '' : 's'}` : ''}`);
