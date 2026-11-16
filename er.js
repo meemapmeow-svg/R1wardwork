@@ -189,7 +189,12 @@ function renderEr() {
       h('p', null, q ? 'Try a different search.' : erState.view === 'open' ? 'Tap + when the ER calls.' : 'Consults you close or admit appear here.')));
     return;
   }
-  list.replaceChildren(...shown.map(consultCard));
+  // Finished consults can be cleared out together (only the ones on screen, so a search narrows it).
+  const clearAll = erState.view === 'closed' && shown.length > 1 && h('button', {
+    class: 'ghost-btn danger',
+    onclick: () => deleteConsults(shown, `Delete ${q ? 'these' : 'all'} ${shown.length} closed and admitted consults? Patients already admitted stay in the ward list.`),
+  }, `Delete ${q ? 'these' : 'all'} ${shown.length}`);
+  list.replaceChildren(...(clearAll ? [clearAll] : []), ...shown.map(consultCard));
 }
 
 function consultCard(c) {
@@ -222,6 +227,7 @@ function consultCard(c) {
         ? h('button', { class: 'doc' + (c.status === 'seen' ? ' done' : ''), 'aria-pressed': String(c.status === 'seen'), onclick: () => setConsultStatus(c.id, c.status === 'seen' ? 'new' : 'seen') },
           h('span', { class: 'box', 'aria-hidden': 'true' }), 'Seen')
         : h('button', { class: 'text-btn', onclick: () => setConsultStatus(c.id, 'seen') }, 'Reopen'),
+      !isOpen(c) && h('button', { class: 'text-btn danger-text', onclick: () => deleteConsults([c], deleteQuestion(c)) }, 'Delete'),
       h('button', { class: 'text-btn', onclick: () => openTextSheet('ER consult message', consultMessage(c)) }, 'Copy message'),
       isOpen(c) && h('button', { class: 'text-btn strong', onclick: () => admitConsult(c) }, 'Admit'),
       isOpen(c) && h('button', { class: 'text-btn', onclick: () => setConsultStatus(c.id, 'closed') }, 'Close')));
@@ -356,15 +362,23 @@ consultForm.addEventListener('submit', (e) => {
 
 $('#consultCancel').addEventListener('click', () => closeConsult());
 consultEditor.addEventListener('cancel', (e) => { e.preventDefault(); closeConsult(); });
+// Deleting is always confirmed first and can be undone from the toast.
+function deleteConsults(doomed, question) {
+  if (!doomed.length || !confirm(question)) return false;
+  const before = consults.slice();
+  consults = consults.filter((c) => !doomed.includes(c));
+  saveConsults();
+  renderEr();
+  toast(doomed.length === 1 ? 'Consult deleted' : `${doomed.length} consults deleted`,
+    { label: 'Undo', run: () => { consults = before; saveConsults(); renderEr(); } });
+  return true;
+}
+
+const deleteQuestion = (c) => `Delete the consult for ${fullName(c) || 'this patient'}?`;
+
 $('#consultDelete').addEventListener('click', () => {
   const c = consults.find((x) => x.id === consultId);
-  if (!c || !confirm(`Delete the consult for ${fullName(c) || 'this patient'}?`)) return;
-  const idx = consults.indexOf(c);
-  consults.splice(idx, 1);
-  saveConsults();
-  closeConsult(true);
-  renderEr();
-  toast('Consult deleted', { label: 'Undo', run: () => { consults.splice(idx, 0, c); saveConsults(); renderEr(); } });
+  if (c && deleteConsults([c], deleteQuestion(c))) closeConsult(true);
 });
 
 // A sticker gives name, HN and age without typing.

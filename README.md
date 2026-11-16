@@ -46,6 +46,8 @@ Each consult card shows when it was received and has:
 - **Admit** — opens a new ward patient filled in from the consult (or the
   existing patient with that HN); saving it marks the consult as admitted
 - **Close** — for consults that end without admission
+- **Delete** — on closed and admitted consults, one at a time or all at once
+  from the top of the Closed / admitted list (the ward patient is not affected)
 
 ER consults and your button lists are included in backup files.
 
