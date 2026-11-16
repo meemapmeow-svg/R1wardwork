@@ -6,46 +6,81 @@
 
 const ER_KEY = 'wardwork.er.v1';
 
-const ER_SCHEMES = ['ข้าราชการ', 'ประกันสังคม', 'UC รามา', 'UC ที่อื่น', 'ผู้พิการ', 'พรบ.', 'ชำระเงินเอง', 'ประกันเอกชน'];
-const ER_UD = ['HT', 'DM', 'DLP', 'Old CVA', 'CKD', 'IHD', 'AF'];
-// `side` films take a side: tapping goes Rt → Lt → Both → off.
-const ER_FILMS = [
-  { id: 'CXR' }, { id: 'Pelvis' },
-  { id: 'Hip AP', side: true }, { id: 'Hip lateral cross-table', side: true },
-  { id: 'Shoulder', side: true }, { id: 'Upper arm', side: true }, { id: 'Forearm', side: true },
-  { id: 'Wrist', side: true }, { id: 'Hand', side: true }, { id: 'Fingers', side: true },
-  { id: 'Thigh', side: true }, { id: 'Knee', side: true }, { id: 'Leg', side: true },
-  { id: 'Ankle', side: true }, { id: 'Foot', side: true }, { id: 'Toes', side: true },
-];
+// The tap-to-select buttons. These are only the starting set: the lists can be
+// edited in the app (menu → Edit ER consult buttons) and are stored on the device.
+const ER_DEFAULTS = {
+  prefixes: ['นาย', 'นาง', 'น.ส.', 'ด.ช.', 'ด.ญ.'],
+  schemes: ['ข้าราชการ', 'ประกันสังคม', 'UC รามา', 'UC ที่อื่น', 'ผู้พิการ', 'พรบ.', 'ชำระเงินเอง', 'ประกันเอกชน'],
+  ud: ['HT', 'DM', 'DLP', 'Old CVA', 'CKD', 'IHD', 'AF'],
+  filmsPlain: ['CXR', 'Pelvis'],
+  // These take a side: tapping goes Rt → Lt → Both → off.
+  filmsSided: ['Hip AP', 'Hip lateral cross-table', 'Shoulder', 'Upper arm', 'Forearm', 'Wrist', 'Hand', 'Fingers', 'Thigh', 'Knee', 'Leg', 'Ankle', 'Foot', 'Toes'],
+  labs: ['CBC', 'Elyte', 'BUN', 'Cr', 'Coagulogram', 'Ca', 'Mg', 'PO4', 'LFT', 'Anti-HIV', 'D-dimer'],
+  locations: ['Resus', 'Counter 4', 'T1', 'T2', 'T3', 'OGP'],
+};
+const ER_OPTION_KEYS = Object.keys(ER_DEFAULTS);
+const ER_OPTIONS_KEY = 'wardwork.er.options';
 const ER_SIDES = ['Rt', 'Lt', 'Both'];
-const ER_LABS = ['CBC', 'Elyte', 'BUN', 'Cr', 'Coagulogram', 'Ca', 'Mg', 'PO4', 'LFT', 'Anti-HIV', 'D-dimer'];
-const ER_LOCATIONS = ['Resus', 'Counter 4', 'T1', 'T2', 'T3', 'OGP'];
+// Locations inside the ER are written "ER Resus" etc. in messages; ones you add are written as typed.
+const ER_ZONES = ER_DEFAULTS.locations;
 const OTHER = 'other';
+
+const unique = (arr) => [...new Set(arr)];
+const cleanList = (v) => unique((Array.isArray(v) ? v : []).map((x) => String(x == null ? '' : x).trim().slice(0, 60)).filter(Boolean));
+
+function cleanOptions(raw) {
+  const out = {};
+  for (const k of ER_OPTION_KEYS) out[k] = raw && Array.isArray(raw[k]) ? cleanList(raw[k]) : [...ER_DEFAULTS[k]];
+  // A film can only be in one of the two film lists.
+  out.filmsSided = out.filmsSided.filter((x) => !out.filmsPlain.includes(x));
+  return out;
+}
+
+function loadErOptions() {
+  try { return cleanOptions(JSON.parse(localStorage.getItem(ER_OPTIONS_KEY))); }
+  catch (e) { return cleanOptions(null); }
+}
+
+function saveErOptions() {
+  try { localStorage.setItem(ER_OPTIONS_KEY, JSON.stringify(erOptions)); } catch (e) {}
+}
+
+// Used by the backup import in app.js.
+function importErOptions(raw) {
+  if (!raw || typeof raw !== 'object') return;
+  erOptions = cleanOptions(raw);
+  saveErOptions();
+}
+
+let erOptions = loadErOptions();
+const filmDefs = () => [...erOptions.filmsPlain.map((id) => ({ id })), ...erOptions.filmsSided.map((id) => ({ id, side: true }))];
+// The current buttons, plus anything this consult already holds that has since been removed from the list.
+const withExtras = (options, held) => unique([...options, ...held.filter(Boolean)]);
 
 /* ---------- storage ---------- */
 
 function normalizeConsult(c) {
   const str = (v) => (v == null ? '' : String(v)).trim();
-  const list = (v, allowed) => (Array.isArray(v) ? v.map(str).filter((x) => allowed.includes(x)) : []);
   // Consults saved before these options were renamed or split.
-  if (c.films && c.films.Arm && !c.films.Forearm) c = { ...c, films: { ...c.films, Forearm: c.films.Arm } };
+  if (c.films && c.films.Arm && !c.films.Forearm) c = { ...c, films: { ...c.films, Forearm: c.films.Arm, Arm: undefined } };
   if (c.scheme === 'UC') c = { ...c, scheme: OTHER, schemeOther: 'UC' };
+  // Choices are kept as stored even if their button is later removed from the lists.
   const films = {};
-  for (const f of ER_FILMS) {
-    const v = c && c.films ? str(c.films[f.id]) : '';
-    if (f.side ? ER_SIDES.includes(v) : v === 'Y') films[f.id] = v;
+  for (const [id, v] of Object.entries(c && c.films && typeof c.films === 'object' ? c.films : {})) {
+    if (id.trim() && (v === 'Y' || ER_SIDES.includes(v))) films[id.trim()] = v;
   }
   const status = ['new', 'seen', 'closed', 'admitted'].includes(c.status) ? c.status : 'new';
   return {
     id: str(c.id) || uid(),
+    prefix: str(c.prefix),
     name: str(c.name), hn: str(c.hn), age: str(c.age),
-    scheme: [...ER_SCHEMES, OTHER].includes(c.scheme) ? c.scheme : '',
+    scheme: str(c.scheme),
     schemeOther: str(c.schemeOther),
-    ud: list(c.ud, ER_UD), udOther: str(c.udOther), noUd: !!c.noUd,
+    ud: cleanList(c.ud), udOther: str(c.udOther), noUd: !!c.noUd,
     cc: str(c.cc), pi: str(c.pi),
-    films, labs: list(c.labs, ER_LABS),
+    films, labs: cleanList(c.labs),
     dx: str(c.dx),
-    location: [...ER_LOCATIONS, OTHER].includes(c.location) ? c.location : '',
+    location: str(c.location),
     locationOther: str(c.locationOther),
     contact: str(c.contact),
     status,
@@ -90,10 +125,11 @@ const erState = { view: 'open', query: '' };
 
 const isOpen = (c) => c.status === 'new' || c.status === 'seen';
 const schemeText = (c) => (c.scheme === OTHER ? c.schemeOther : c.scheme);
-const locationText = (c) => (c.location === OTHER ? c.locationOther : c.location ? `ER ${c.location}` : '');
+const fullName = (c) => [c.prefix, c.name].filter(Boolean).join(' ');
+const locationText = (c) => (c.location === OTHER ? c.locationOther : ER_ZONES.includes(c.location) ? `ER ${c.location}` : c.location);
 const udText = (c) => (c.noUd ? 'ไม่มีโรคประจำตัว' : [...c.ud, c.udOther].filter(Boolean).join(', '));
-const filmText = (c) => ER_FILMS.filter((f) => c.films[f.id]).map((f) => (f.side ? `${f.id} ${c.films[f.id]}` : f.id)).join(', ');
-const labText = (c) => c.labs.join(', ');
+const filmText = (c) => withExtras(filmDefs().map((f) => f.id), Object.keys(c.films)).filter((id) => c.films[id]).map((id) => (c.films[id] === 'Y' ? id : `${id} ${c.films[id]}`)).join(', ');
+const labText = (c) => withExtras(erOptions.labs, c.labs).filter((l) => c.labs.includes(l)).join(', ');
 
 function consultMessage(c) {
   const age = /^\d+$/.test(c.age) ? `${c.age} ปี` : c.age;
@@ -101,7 +137,7 @@ function consultMessage(c) {
   return [
     'ขออนุญาตรายงานเคส consult ER ครับ',
     '',
-    c.name,
+    fullName(c),
     ...(age ? [`อายุ ${age}`] : []),
     ...(c.hn ? [`HN ${c.hn}`] : []),
     ...(schemeText(c) ? [`สิทธิ์ ${schemeText(c)}`] : []),
@@ -142,7 +178,7 @@ function renderEr() {
   const q = erState.query.toLowerCase();
   const shown = consults
     .filter((c) => isOpen(c) === (erState.view === 'open'))
-    .filter((c) => !q || [c.name, c.hn, c.dx, c.cc, locationText(c), c.contact].some((v) => v.toLowerCase().includes(q)))
+    .filter((c) => !q || [fullName(c), c.hn, c.dx, c.cc, locationText(c), c.contact].some((v) => v.toLowerCase().includes(q)))
     // Not-yet-seen first, then newest first.
     .sort((a, b) => (a.status === 'new' ? 0 : 1) - (b.status === 'new' ? 0 : 1) || b.createdAt - a.createdAt);
 
@@ -153,7 +189,12 @@ function renderEr() {
       h('p', null, q ? 'Try a different search.' : erState.view === 'open' ? 'Tap + when the ER calls.' : 'Consults you close or admit appear here.')));
     return;
   }
-  list.replaceChildren(...shown.map(consultCard));
+  // Finished consults can be cleared out together (only the ones on screen, so a search narrows it).
+  const clearAll = erState.view === 'closed' && shown.length > 1 && h('button', {
+    class: 'ghost-btn danger',
+    onclick: () => deleteConsults(shown, `Delete ${q ? 'these' : 'all'} ${shown.length} closed and admitted consults? Patients already admitted stay in the ward list.`),
+  }, `Delete ${q ? 'these' : 'all'} ${shown.length}`);
+  list.replaceChildren(...(clearAll ? [clearAll] : []), ...shown.map(consultCard));
 }
 
 function consultCard(c) {
@@ -164,8 +205,8 @@ function consultCard(c) {
 
   return h('article', { class: `card consult ${c.status}` },
     h('div', { class: 'card-head' },
-      h('button', { class: 'card-title', onclick: () => openConsult(c), 'aria-label': `Edit ${c.name}` },
-        h('span', { class: 'name' }, c.name || 'Unnamed'),
+      h('button', { class: 'card-title', onclick: () => openConsult(c), 'aria-label': `Edit ${fullName(c)}` },
+        h('span', { class: 'name' }, fullName(c) || 'Unnamed'),
         c.age && h('span', { class: 'age' }, `${c.age} y`)),
       h('span', { class: `count ${c.status === 'new' ? '' : 'ok'}` }, statusLabel)),
     who && h('p', { class: 'meta' }, who),
@@ -181,10 +222,12 @@ function consultCard(c) {
     info('Film', filmText(c)),
     info('Lab', labText(c)),
     h('div', { class: 'card-foot' },
+      h('button', { class: 'text-btn', onclick: () => openConsult(c) }, 'Edit'),
       isOpen(c)
         ? h('button', { class: 'doc' + (c.status === 'seen' ? ' done' : ''), 'aria-pressed': String(c.status === 'seen'), onclick: () => setConsultStatus(c.id, c.status === 'seen' ? 'new' : 'seen') },
           h('span', { class: 'box', 'aria-hidden': 'true' }), 'Seen')
         : h('button', { class: 'text-btn', onclick: () => setConsultStatus(c.id, 'seen') }, 'Reopen'),
+      !isOpen(c) && h('button', { class: 'text-btn danger-text', onclick: () => deleteConsults([c], deleteQuestion(c)) }, 'Delete'),
       h('button', { class: 'text-btn', onclick: () => openTextSheet('ER consult message', consultMessage(c)) }, 'Copy message'),
       isOpen(c) && h('button', { class: 'text-btn strong', onclick: () => admitConsult(c) }, 'Admit'),
       isOpen(c) && h('button', { class: 'text-btn', onclick: () => setConsultStatus(c.id, 'closed') }, 'Close')));
@@ -198,7 +241,7 @@ function setConsultStatus(id, status) {
   c.updatedAt = Date.now();
   saveConsults();
   renderEr();
-  if (status === 'closed') toast(`${c.name || 'Consult'} closed`, { label: 'Undo', run: () => setConsultStatus(id, before) });
+  if (status === 'closed') toast(`${fullName(c) || 'Consult'} closed`, { label: 'Undo', run: () => setConsultStatus(id, before) });
 }
 
 /* ---------- admit: consult → ward patient ---------- */
@@ -218,7 +261,7 @@ function admitConsult(c) {
     return;
   }
   const notes = [schemeText(c) && `สิทธิ์: ${schemeText(c)}`, udText(c) && `U/D: ${udText(c)}`, c.cc && `CC: ${c.cc}`].filter(Boolean).join('\n');
-  openEditor(null, { quiet: true, afterSave: done, preset: { name: c.name, hn: c.hn, age: c.age, diagnosis: c.dx, notes, admitDate: todayStr() } });
+  openEditor(null, { quiet: true, afterSave: done, preset: { name: fullName(c), hn: c.hn, age: c.age, diagnosis: c.dx, notes, admitDate: todayStr() } });
   setScanStatus('Filled in from the ER consult. Add ward and bed, then Save to admit.');
 }
 
@@ -239,26 +282,32 @@ function renderPicks() {
   const single = (key, value) => touch(() => { draft[key] = draft[key] === value ? '' : value; });
   const toggle = (arr, value) => { const i = arr.indexOf(value); if (i < 0) arr.push(value); else arr.splice(i, 1); };
 
+  $('#pickPrefix').replaceChildren(
+    ...withExtras(erOptions.prefixes, [draft.prefix]).map((x) => chip(x, draft.prefix === x, single('prefix', x))));
+
   $('#pickScheme').replaceChildren(
-    ...ER_SCHEMES.map((s) => chip(s, draft.scheme === s, single('scheme', s))),
+    ...withExtras(erOptions.schemes, [draft.scheme === OTHER ? '' : draft.scheme]).map((x) => chip(x, draft.scheme === x, single('scheme', x))),
     chip('อื่นๆ', draft.scheme === OTHER, single('scheme', OTHER)));
   consultForm.elements.schemeOther.hidden = draft.scheme !== OTHER;
 
   $('#pickUd').replaceChildren(
     chip('ไม่มี', draft.noUd, touch(() => { draft.noUd = !draft.noUd; if (draft.noUd) draft.ud = []; })),
-    ...ER_UD.map((u) => chip(u, draft.ud.includes(u), touch(() => { toggle(draft.ud, u); draft.noUd = false; }))));
+    ...withExtras(erOptions.ud, draft.ud).map((u) => chip(u, draft.ud.includes(u), touch(() => { toggle(draft.ud, u); draft.noUd = false; }))));
   consultForm.elements.udOther.hidden = draft.noUd;
 
-  $('#pickFilm').replaceChildren(...ER_FILMS.map((f) => {
-    const v = draft.films[f.id];
-    const next = f.side ? ER_SIDES[ER_SIDES.indexOf(v) + 1] : (v ? undefined : 'Y');
-    return chip(v && f.side ? `${f.id} ${v}` : f.id, v, touch(() => { if (next) draft.films[f.id] = next; else delete draft.films[f.id]; }));
+  const defs = filmDefs();
+  $('#pickFilm').replaceChildren(...withExtras(defs.map((f) => f.id), Object.keys(draft.films)).map((id) => {
+    const def = defs.find((f) => f.id === id);
+    const v = draft.films[id];
+    const sided = def ? !!def.side : v !== 'Y';
+    const next = sided ? ER_SIDES[ER_SIDES.indexOf(v) + 1] : (v ? undefined : 'Y');
+    return chip(v && v !== 'Y' ? `${id} ${v}` : id, v, touch(() => { if (next) draft.films[id] = next; else delete draft.films[id]; }));
   }));
 
-  $('#pickLab').replaceChildren(...ER_LABS.map((l) => chip(l, draft.labs.includes(l), touch(() => toggle(draft.labs, l)))));
+  $('#pickLab').replaceChildren(...withExtras(erOptions.labs, draft.labs).map((l) => chip(l, draft.labs.includes(l), touch(() => toggle(draft.labs, l)))));
 
   $('#pickLocation').replaceChildren(
-    ...ER_LOCATIONS.map((l) => chip(l, draft.location === l, single('location', l))),
+    ...withExtras(erOptions.locations, [draft.location === OTHER ? '' : draft.location]).map((l) => chip(l, draft.location === l, single('location', l))),
     chip('Other ward', draft.location === OTHER, single('location', OTHER)));
   consultForm.elements.locationOther.hidden = draft.location !== OTHER;
 }
@@ -266,7 +315,7 @@ function renderPicks() {
 function openConsult(c) {
   consultId = c ? c.id : null;
   const data = c || normalizeConsult({});
-  draft = { scheme: data.scheme, ud: [...data.ud], noUd: data.noUd, films: { ...data.films }, labs: [...data.labs], location: data.location };
+  draft = { prefix: data.prefix, scheme: data.scheme, ud: [...data.ud], noUd: data.noUd, films: { ...data.films }, labs: [...data.labs], location: data.location };
   $('#consultTitle').textContent = c ? 'Edit ER consult' : 'New ER consult';
   for (const k of ['name', 'hn', 'age', 'schemeOther', 'udOther', 'cc', 'pi', 'dx', 'locationOther', 'contact']) consultForm.elements[k].value = data[k];
   $('#consultActions').hidden = !c;
@@ -313,21 +362,42 @@ consultForm.addEventListener('submit', (e) => {
 
 $('#consultCancel').addEventListener('click', () => closeConsult());
 consultEditor.addEventListener('cancel', (e) => { e.preventDefault(); closeConsult(); });
+// Deleting is always confirmed first and can be undone from the toast.
+function deleteConsults(doomed, question) {
+  if (!doomed.length || !confirm(question)) return false;
+  const before = consults.slice();
+  consults = consults.filter((c) => !doomed.includes(c));
+  saveConsults();
+  renderEr();
+  toast(doomed.length === 1 ? 'Consult deleted' : `${doomed.length} consults deleted`,
+    { label: 'Undo', run: () => { consults = before; saveConsults(); renderEr(); } });
+  return true;
+}
+
+const deleteQuestion = (c) => `Delete the consult for ${fullName(c) || 'this patient'}?`;
+
 $('#consultDelete').addEventListener('click', () => {
   const c = consults.find((x) => x.id === consultId);
-  if (!c || !confirm(`Delete the consult for ${c.name || 'this patient'}?`)) return;
-  const idx = consults.indexOf(c);
-  consults.splice(idx, 1);
-  saveConsults();
-  closeConsult(true);
-  renderEr();
-  toast('Consult deleted', { label: 'Undo', run: () => { consults.splice(idx, 0, c); saveConsults(); renderEr(); } });
+  if (c && deleteConsults([c], deleteQuestion(c))) closeConsult(true);
 });
 
 // A sticker gives name, HN and age without typing.
 function fillConsultFromScan(found) {
   const f = consultForm.elements;
   const filled = [];
+  // A title read with the name ("นาย ...", "น.ส....") becomes the prefix button.
+  if (found.name) {
+    const titles = [...erOptions.prefixes, 'นางสาว'].sort((x, y) => y.length - x.length);
+    const title = titles.find((t) => found.name.startsWith(t) && found.name.length > t.length);
+    if (title) {
+      const asButton = title === 'นางสาว' && erOptions.prefixes.includes('น.ส.') ? 'น.ส.' : title;
+      if (erOptions.prefixes.includes(asButton)) {
+        draft.prefix = asButton;
+        found = { ...found, name: found.name.slice(title.length).trim() };
+        renderPicks();
+      }
+    }
+  }
   for (const [k, label] of [['name', 'name'], ['hn', 'HN'], ['age', 'age']]) {
     if (!found[k]) continue;
     f[k].value = found[k];
@@ -339,6 +409,44 @@ function fillConsultFromScan(found) {
     : 'No name, HN or age could be read from that picture.';
 }
 $('#consultScanBtn').addEventListener('click', () => openScanner(fillConsultFromScan));
+
+/* ---------- editing the button lists ---------- */
+
+const erSettings = $('#erSettings');
+const erSettingsForm = $('#erSettingsForm');
+
+function fillErSettings(options) {
+  for (const k of ER_OPTION_KEYS) {
+    const box = erSettingsForm.elements[k];
+    box.value = options[k].join('\n');
+    box.rows = Math.max(3, options[k].length + 1);
+  }
+}
+
+function openErSettings() {
+  fillErSettings(erOptions);
+  erSettings.showModal();
+  $('.sheet-body', erSettings).scrollTop = 0;
+}
+
+erSettingsForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const raw = {};
+  for (const k of ER_OPTION_KEYS) raw[k] = erSettingsForm.elements[k].value.split('\n');
+  erOptions = cleanOptions(raw);
+  saveErOptions();
+  erSettings.close();
+  if (consultEditor.open) renderPicks();
+  renderEr();
+  toast('ER buttons saved');
+});
+$('#erSettingsCancel').addEventListener('click', () => erSettings.close());
+$('#erSettingsReset').addEventListener('click', () => {
+  if (confirm('Put all the lists back to the original buttons? (Nothing is saved until you tap Save.)')) fillErSettings(cleanOptions(null));
+});
+for (const b of document.querySelectorAll('[data-open-er-settings]')) {
+  b.addEventListener('click', () => { if (menu.open) menu.close(); openErSettings(); });
+}
 
 /* ---------- switching between Ward and ER ---------- */
 

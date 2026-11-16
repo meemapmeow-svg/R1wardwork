@@ -161,6 +161,7 @@
         </div>
         <fieldset>
           <legend>Patient</legend>
+          <div class="pick" id="pickPrefix" aria-label="Name prefix (optional)"></div>
           <label class="field">Name
             <input name="name" autocomplete="off" enterkeyhint="next">
           </label>
@@ -227,9 +228,67 @@
             <input name="contact" type="tel" inputmode="tel" autocomplete="off">
           </label>
         </fieldset>
+        <p class="hint"><button type="button" class="text-btn" data-open-er-settings>Edit the buttons on this form…</button></p>
         <div class="danger-zone" id="consultActions" hidden>
           <button type="button" class="ghost-btn danger" id="consultDelete">Delete consult</button>
         </div>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ER button lists -->
+  <dialog id="erSettings" class="sheet">
+    <form id="erSettingsForm" novalidate>
+      <div class="sheet-head">
+        <button type="button" class="text-btn" id="erSettingsCancel">Cancel</button>
+        <h2>ER consult buttons</h2>
+        <button type="submit" class="text-btn strong">Save</button>
+      </div>
+      <div class="sheet-body">
+        <p class="hint">One button per line. Add a line to add a button, delete a line to remove it, and move lines to change the order. Consults you already saved keep what was chosen, even if you remove its button here.</p>
+        <fieldset>
+          <legend>Name prefix</legend>
+          <label class="field"><span class="visually-hidden">Name prefix</span>
+            <textarea name="prefixes" rows="4" spellcheck="false" autocapitalize="off"></textarea>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>สิทธิ์การรักษา</legend>
+          <label class="field">“อื่นๆ” is always there.
+            <textarea name="schemes" rows="4" spellcheck="false" autocapitalize="off"></textarea>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Underlying disease</legend>
+          <label class="field">“ไม่มี” is always there.
+            <textarea name="ud" rows="4" spellcheck="false" autocapitalize="off"></textarea>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Film — no side</legend>
+          <label class="field">Films that are just on or off.
+            <textarea name="filmsPlain" rows="4" spellcheck="false" autocapitalize="off"></textarea>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Film — with side</legend>
+          <label class="field">Films where tapping again picks Rt, Lt or Both.
+            <textarea name="filmsSided" rows="4" spellcheck="false" autocapitalize="off"></textarea>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Lab</legend>
+          <label class="field"><span class="visually-hidden">Lab</span>
+            <textarea name="labs" rows="4" spellcheck="false" autocapitalize="off"></textarea>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Location</legend>
+          <label class="field">“Other ward” is always there.
+            <textarea name="locations" rows="4" spellcheck="false" autocapitalize="off"></textarea>
+          </label>
+        </fieldset>
+        <button type="button" class="ghost-btn" id="erSettingsReset">Reset to the original buttons</button>
       </div>
     </form>
   </dialog>
@@ -279,6 +338,7 @@
     </div>
     <div class="sheet-body">
       <p class="hint">Everything is stored only on this device, inside this browser. Nothing is uploaded. Export a backup regularly — clearing browser data or losing the phone erases the list.</p>
+      <button type="button" class="block-btn" data-open-er-settings>Edit ER consult buttons</button>
       <button type="button" class="block-btn" id="exportBtn">Export backup file</button>
       <button type="button" class="block-btn" id="importBtn">Import backup file</button>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
